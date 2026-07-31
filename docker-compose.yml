@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./generated_courses:/app/generated_courses
+
+  teams-bot:
+    build:
+      context: .
+      dockerfile: docker/teams-bot.Dockerfile
+    ports:
+      - "3978:3978"
+    env_file:
+      - .env
+    environment:
+      BACKEND_BASE_URL: http://backend:8000
+    depends_on:
+      - backend

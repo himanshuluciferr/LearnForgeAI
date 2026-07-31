@@ -1,0 +1,43 @@
+# --- API ---
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-multipart
+
+# --- Orchestration ---
+# Only the core runtime plus the Foundry client; the `agent-framework` umbrella
+# pulls in Bedrock/Gemini/Anthropic/Ollama clients we never use.
+agent-framework-core>=1.13.0
+agent-framework-foundry>=1.10.4
+
+# --- Azure ---
+openai
+azure-identity
+azure-search-documents
+azure-cosmos
+azure-storage-blob
+azure-ai-projects
+
+# --- Teams / M365 Agent ---
+botbuilder-core
+botbuilder-integration-aiohttp
+aiohttp
+
+# --- Export ---
+markdown
+python-docx
+weasyprint
+
+# --- Utils ---
+httpx
+tenacity
+structlog
+python-dotenv
+
+# --- Dev ---
+pytest
+pytest-asyncio
+ruff
+debugpy
+agent-dev-cli>=0.0.1b260427
