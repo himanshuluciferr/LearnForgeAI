@@ -210,8 +210,8 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | # | Agent | Reads from state | Writes to state | Status |
 |---|---|---|---|---|
 | 1 | `requirement-agent` | `prompt` | `request` | ✅ |
-| 2 | `skill-analysis-agent` | `request` | `skill_analysis` | 🚧 |
-| 3 | `research-agent` | `request`, `skill_analysis` | `research` | 🚧 |
+| 2 | `skill-analysis-agent` | `request` | `skill_analysis` | ✅ |
+| 3 | `research-agent` | `request`, `skill_analysis` | `research` | ✅ |
 | 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | 🚧 |
 | 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | 🚧 |
 | 6 | `practice-agent` | `chapters` | `practice` | 🚧 |
@@ -249,22 +249,55 @@ Two design points that turned out to matter a lot:
 
 Verified live on four cases including Hindi input and an off-topic prompt.
 
-### 2. `skill-analysis-agent` 🚧 — *next to build*
+### 2. `skill-analysis-agent` ✅
 
 Sizes the topic before any content is written: category, true difficulty,
 prerequisites, estimated hours, career paths. Downstream agents need this to pitch the
 material correctly — a course on Kubernetes operators for someone who already uses
 Kubernetes daily should not open with "what is a container".
 
-It is also the first node that **reads a field an earlier agent wrote**, so it is where
-the state-passing contract gets its real test.
+It is the first node that **reads a field an earlier agent wrote**. `build_prompt()`
+renders `LearningRequest` into text; the raw Teams message is never seen again.
 
-### 3. `research-agent` 🚧
+Two things this node pinned down:
 
-Gathers trusted sources — official docs, Microsoft Learn, GitHub, reputable blogs — using
-the `research` and `ranking` skills. This is the **grounding** step: it exists so chapters
-are written from real, citable material instead of the model's recollection. Reduces
-hallucination more than any prompt tweak can.
+- **`difficulty` is the skill's, `experience` is the learner's.** Without an explicit
+  field description the model kept echoing the learner's level back.
+- **Prerequisites must be real blockers.** The first live run listed "ability to use a
+  text editor" for Markdown. Fixed in the field description, not the prompt — same
+  lesson as the `language` bug.
+
+Because it has a sibling edge to `rejected`, both edges out of `requirement` carry
+conditions that are exact opposites; a test enforces that they can never both fire.
+
+### 3. `research-agent` ✅
+
+Gathers trusted sources — official docs, Microsoft Learn, GitHub, reputable blogs. This is
+the **grounding** step: it exists so chapters are written from real, citable material
+instead of the model's recollection.
+
+Unlike the first two agents it is a **pipeline, not a single call**:
+
+1. **Propose** — the model suggests six to eight sources (`ResearchBundle`).
+2. **Verify** — the `research` skill fetches every URL and discards anything that does not
+   answer. Deterministic, no model involved.
+3. **Rank** — the `ranking` skill scores by source kind and sorts best-first.
+
+Step 2 is not optional. On the first live run the model proposed
+`https://learn.microsoft.com/rest/api/search/` — a perfectly plausible Microsoft Learn URL
+that returns **404**. Across runs roughly a third of proposed links were dead. A citation
+the learner cannot open is worse than no citation, because it looks authoritative.
+
+> ⚠️ **These URLs are attacker-influenced input.** The model chooses them and our server
+> fetches them, which is a textbook SSRF path. `is_fetchable()` requires `https` and
+> rejects loopback, private, link-local and reserved addresses — including the cloud
+> metadata endpoint `169.254.169.254` — before any request leaves the process.
+
+An empty result is a valid outcome: an ungrounded course still beats a failed job, so the
+step is marked complete either way.
+
+**Not yet real web search.** The model proposes from memory and we filter. Swapping the
+propose step for a real search API or an Azure AI Search index is a change to one function.
 
 ### 4. `curriculum-agent` 🚧
 
@@ -556,9 +589,9 @@ Real, tracked, and deliberately deferred:
 | 5 | Rejection path for off-topic prompts | ✅ |
 | 6 | Tests: offline + opt-in live layers | ✅ |
 | 7 | Course persistence + `GET /courses/{id}` | ✅ |
-| 8 | **`skill-analysis-agent` — first agent-to-agent handoff** | ⬅️ next |
-| 9 | `research-agent` + Azure AI Search grounding | 📋 |
-| 10 | `curriculum-agent` | 📋 |
+| 8 | `skill-analysis-agent` — first agent-to-agent handoff | ✅ |
+| 9 | `research-agent` + source verification | ✅ |
+| 10 | **`curriculum-agent`** | ⬅️ next |
 | 11 | Cosmos swap for jobs and courses | 📋 |
 | 12 | `chapter-agent` — the content core | 📋 |
 | 13 | `practice`, `project`, `quiz`, `interview` | 📋 |

@@ -82,11 +82,31 @@ class LearningRequest(BaseModel):
 
 
 class SkillAnalysis(BaseModel):
-    category: str
-    difficulty: ExperienceLevel
-    prerequisites: list[str] = Field(default_factory=list)
-    estimated_hours: int
-    career_paths: list[str] = Field(default_factory=list)
+    """Output of skill-analysis-agent — how big the topic is and where it leads."""
+
+    category: str = Field(
+        description="Broad field this skill belongs to, e.g. 'Cloud', 'Data Engineering'."
+    )
+    difficulty: ExperienceLevel = Field(
+        description="How hard the skill is in itself, independent of this learner's level."
+    )
+    prerequisites: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Skills that genuinely block starting. Empty for self-contained beginner topics. "
+            "Never list the skill itself, general computer literacy, or ordinary tools "
+            "such as a text editor, a browser or a git host."
+        ),
+    )
+    estimated_hours: int = Field(
+        ge=1,
+        le=500,
+        description="Hours to reach the learner's stated goal, not to master the whole field.",
+    )
+    career_paths: list[str] = Field(
+        default_factory=list,
+        description="Real job titles this skill contributes to, e.g. 'Cloud Solution Architect'.",
+    )
 
 
 class ResourceKind(StrEnum):
@@ -98,11 +118,30 @@ class ResourceKind(StrEnum):
 
 
 class ResearchSource(BaseModel):
-    title: str
-    url: str
-    kind: ResourceKind
-    summary: str
-    rank_score: float = 0.0
+    """One reference the chapter writer is allowed to lean on."""
+
+    title: str = Field(description="Title of the page, as it appears on the page itself.")
+    url: str = Field(
+        description=(
+            "Full https URL you are confident exists. Prefer a stable landing or section "
+            "page over a deep versioned link, which rots. Never guess a path."
+        )
+    )
+    kind: ResourceKind = Field(description="What sort of resource this is.")
+    summary: str = Field(
+        description="One or two sentences: what this source covers and when it helps."
+    )
+    rank_score: float = Field(
+        default=0.0, description="Ignored on input — the ranking step overwrites it."
+    )
+
+
+class ResearchBundle(BaseModel):
+    """Response schema for research-agent. Structured output needs an object at the root."""
+
+    sources: list[ResearchSource] = Field(
+        description="Sources covering the skill from first steps through to advanced use."
+    )
 
 
 class ChapterOutline(BaseModel):
