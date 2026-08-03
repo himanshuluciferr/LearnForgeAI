@@ -29,3 +29,5 @@ class JobProgress(BaseModel):
     percent: int = 0
     detail: str | None = None
     error: str | None = None
+    # Set once the course is saved; this is how a poller finds the result.
+    course_id: str | None = None

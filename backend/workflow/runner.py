@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
+from backend.models.course import StoredCourse
 from backend.models.job import JobStatus
 from backend.schemas.course import CourseRequest
+from backend.services.course_store import course_store
 from backend.services.job_store import job_store
 from backend.workflow.state import CourseState, Rejection, WorkflowStep
 from backend.workflow.workflow import build_workflow
@@ -37,7 +40,20 @@ async def run_generation(job_id: str, request: CourseRequest) -> None:
         if rejection is not None:
             await job_store.update(job_id, status=JobStatus.REJECTED, detail=rejection.message)
         else:
-            await job_store.update(job_id, status=JobStatus.COMPLETED, percent=state.percent)
+            course = await course_store.save(
+                StoredCourse(
+                    id=str(uuid4()),
+                    user_id=request.user_id,
+                    job_id=job_id,
+                    state=state,
+                )
+            )
+            await job_store.update(
+                job_id,
+                status=JobStatus.COMPLETED,
+                percent=state.percent,
+                course_id=course.id,
+            )
     except Exception as exc:
         # The failure is recorded on the job, so it must not escape the background task.
         logger.exception("Generation job %s failed", job_id)

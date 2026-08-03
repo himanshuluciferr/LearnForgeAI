@@ -450,8 +450,11 @@ diffed and reviewed without touching code — a non-developer can improve a prom
 
 **`backend/services/`** — All Azure SDK usage is confined here. Agents and skills never
 import an Azure SDK directly, so swapping a provider or faking one in tests touches one file.
-`foundry.py` ✅ · `job_store.py` ✅ (in-memory; Cosmos-backed later) · `cosmos.py`,
-`blob_storage.py`, `ai_search.py` 🚧
+`foundry.py` ✅ · `job_store.py` ✅ (in-memory) · `course_store.py` ✅ (JSON files under
+`generated_courses/`) · `cosmos.py`, `blob_storage.py`, `ai_search.py` 🚧
+
+Both stores are **interfaces first, technology second**: callers only use `create/get/update`
+and `save/get`, so Cosmos replaces the class behind them without touching a single caller.
 
 **`backend/schemas/` vs `backend/models/`** — A deliberate split. `schemas/` is the public
 API shape (what Teams sends and receives); `models/` is what we persist. Keeping them apart
@@ -481,6 +484,21 @@ HTTP, so they can scale and deploy independently.
 | Cosmos DB | Users, courses, progress, scores, chat history | 📋 |
 | Blob Storage | Published Markdown / PDF / DOCX | 📋 |
 | Container Apps | Hosts backend + teams-bot | 📋 |
+
+### Planned Cosmos containers
+
+All partitioned by `/user_id`, because every read is scoped to one learner.
+
+| Container | Holds | Replaces |
+|---|---|---|
+| `jobs` | Generation runs and progress | `InMemoryJobStore` |
+| `courses` | The generated course | `FileCourseStore` |
+| `progress` | Chapters read, completion | — |
+| `quiz_results` | Answers and scores | — |
+| `chat_history` | Mentor conversations | — |
+
+The first two have data today and are already behind interfaces. The other three arrive
+with the features that produce them.
 
 **Auth is keyless.** `DefaultAzureCredential` everywhere; no secrets in `.env`.
 
@@ -516,12 +534,14 @@ Real, tracked, and deliberately deferred:
 
 1. **Durability** — `BackgroundTasks` dies with the process, orphaning in-flight jobs.
    `WorkflowBuilder` accepts `checkpoint_storage=`; that's the path.
-2. **Job store is in-memory** — restarts lose jobs. The interface is already isolated in
-   `job_store.py`, so Cosmos slots in behind it.
+2. **Job store is in-memory** — restarts lose progress records. Finished courses survive
+   (JSON on disk), so only in-flight jobs are at risk.
 3. **Parallelism is unsafe today** — state is shared by reference (see §4).
 4. **Python version mismatch** — local venv is 3.13, Dockerfiles pin `python:3.12-slim`.
 5. **Single `requirements.txt`** — should split per container once they deploy separately.
-6. **No auth on the backend** — Teams identity is trusted but not yet verified.
+6. **No auth on the backend** — Teams identity is trusted but not yet verified. `GET
+   /courses/{id}` currently returns any course to any caller; ownership is stored
+   (`user_id`) but not enforced.
 
 ---
 
@@ -535,16 +555,21 @@ Real, tracked, and deliberately deferred:
 | 4 | HTTP → job → workflow → progress slice | ✅ |
 | 5 | Rejection path for off-topic prompts | ✅ |
 | 6 | Tests: offline + opt-in live layers | ✅ |
-| 7 | **`skill-analysis-agent` — first agent-to-agent handoff** | ⬅️ next |
-| 8 | `research-agent` + Azure AI Search grounding | 📋 |
-| 9 | `curriculum` → `chapter` — the content core | 📋 |
-| 10 | `practice`, `project`, `quiz`, `interview` | 📋 |
-| 11 | `review-agent` + the regeneration loop | 📋 |
-| 12 | `publisher` + Blob Storage export | 📋 |
-| 13 | Cosmos-backed jobs and progress | 📋 |
-| 14 | Teams bot + Adaptive Cards | 📋 |
-| 15 | Mentor agent | 📋 |
-| 16 | Deploy to Container Apps | 📋 |
+| 7 | Course persistence + `GET /courses/{id}` | ✅ |
+| 8 | **`skill-analysis-agent` — first agent-to-agent handoff** | ⬅️ next |
+| 9 | `research-agent` + Azure AI Search grounding | 📋 |
+| 10 | `curriculum-agent` | 📋 |
+| 11 | Cosmos swap for jobs and courses | 📋 |
+| 12 | `chapter-agent` — the content core | 📋 |
+| 13 | `practice`, `project`, `quiz`, `interview` | 📋 |
+| 14 | `review-agent` + the regeneration loop | 📋 |
+| 15 | `publisher` + Blob Storage export | 📋 |
+| 16 | Teams bot + Adaptive Cards | 📋 |
+| 17 | Mentor agent | 📋 |
+| 18 | Deploy to Container Apps | 📋 |
+
+Cosmos lands at step 11 — deliberately *before* `chapter-agent`, the first step whose
+output is expensive enough that losing it hurts.
 
 The order is deliberate: each milestone is runnable end-to-end, so there is always
 something to test rather than a large half-built graph.

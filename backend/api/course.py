@@ -6,8 +6,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
+from backend.models.course import StoredCourse
 from backend.models.job import GenerationJob
 from backend.schemas.course import CourseRequest, JobAccepted, JobProgress
+from backend.services.course_store import course_store
 from backend.services.job_store import job_store
 from backend.workflow.runner import run_generation
 
@@ -39,4 +41,13 @@ async def get_progress(job_id: str) -> JobProgress:
         percent=job.percent,
         detail=job.detail,
         error=job.error,
+        course_id=job.course_id,
     )
+
+
+@router.get("/{course_id}")
+async def get_course(course_id: str) -> StoredCourse:
+    course = await course_store.get(course_id)
+    if course is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    return course
