@@ -213,7 +213,7 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 2 | `skill-analysis-agent` | `request` | `skill_analysis` | ✅ |
 | 3 | `research-agent` | `request`, `skill_analysis` | `research` | ✅ |
 | 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | ✅ |
-| 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | 🚧 |
+| 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | ✅ |
 | 6 | `practice-agent` | `chapters` | `practice` | 🚧 |
 | 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | 🚧 |
 | 8 | `quiz-agent` | `chapters` | `quizzes` | 🚧 |
@@ -320,11 +320,35 @@ orientation chapters for experienced learners was measurably ignored; replacing 
 computed, skill-specific instruction ("the learner already uses X, chapter 1 must start past
 that") removed the orientation chapter on the next run.
 
-### 5. `chapter-agent` 🚧
+### 5. `chapter-agent` ✅
 
-The workhorse — writes each chapter's actual content: explanation, code samples, diagrams,
-key points, exercises. Uses the `chapter_writer`, `code_generator` and `diagrams` skills.
-Runs per chapter, and is the target the review loop sends work back to.
+The workhorse — writes each chapter's actual content. It is the first step whose cost scales
+with the plan: one model call per chapter, which is why `MAX_CHAPTERS` exists and why Cosmos
+landed before it.
+
+Chapters are written concurrently through an `asyncio.Semaphore(MAX_CONCURRENT_CHAPTERS)`.
+That is safe here in a way a workflow fan-out would not be: each task returns its own
+`Chapter` and nothing shared is mutated, whereas parallel executors would all be writing the
+one `CourseState`, which MAF passes by reference.
+
+Every call is independent and has no memory of the others, so continuity has to be supplied.
+`covered_so_far()` hands each call the earlier chapters' titles and objectives with an
+instruction not to re-teach them; `coming_later()` lists the later titles as off limits. Both
+decide the branch in Python — first chapter, middle, last — and state only the branch that
+applies, the same move that fixed level adaptation in `curriculum-agent`.
+
+Length is computed, not requested: `target_words()` scales the chapter to the learner's
+`daily_minutes` so a chapter is roughly one sitting, clamped to `MIN_WORDS..MAX_WORDS`.
+
+The model is never asked for anything already known. `assemble()` takes the number and title
+from the outline, so a chapter cannot drift from the curriculum that commissioned it.
+Markdown structure is ours too — the model returns titled `ChapterSection`s and `render_body()`
+emits the headings, because asking for one Markdown blob produced flat prose with no headings
+at all across every live chapter.
+
+A partial course is refused. If any chapter fails, the step raises and names the failed
+numbers, because a course silently missing chapter 3 still reads as finished. There is no
+retry yet, so a single transient rate-limit failure costs the whole step.
 
 ### 6. `practice-agent` 🚧
 
@@ -625,8 +649,8 @@ Real, tracked, and deliberately deferred:
 | 9 | `research-agent` + source verification | ✅ |
 | 10 | **`curriculum-agent`** | ✅ |
 | 11 | Cosmos swap for jobs and courses | ✅ |
-| 12 | `chapter-agent` — the content core | ⬅️ next |
-| 13 | `practice`, `project`, `quiz`, `interview` | 📋 |
+| 12 | **`chapter-agent`** — the content core | ✅ |
+| 13 | `practice`, `project`, `quiz`, `interview` | ⬅️ next |
 | 14 | `review-agent` + the regeneration loop | 📋 |
 | 15 | `publisher` + Blob Storage export | 📋 |
 | 16 | Teams bot + Adaptive Cards | 📋 |

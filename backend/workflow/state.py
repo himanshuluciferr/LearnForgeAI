@@ -175,7 +175,55 @@ class Curriculum(BaseModel):
     )
 
 
+class ChapterSection(BaseModel):
+    """One titled part of a chapter. Asking for parts rather than one blob is what lets us
+    render the Markdown structure ourselves instead of hoping for it."""
+
+    heading: str = Field(
+        description=(
+            "Short heading naming what this part covers, e.g. 'Defining the fields'. "
+            "No numbering and no generic labels like 'Introduction'."
+        )
+    )
+    markdown: str = Field(
+        description=(
+            "This section's content in Markdown: short paragraphs, lists, and fenced code "
+            "blocks with a language tag on every example. Do not write a heading — the "
+            "heading above is rendered for you."
+        )
+    )
+
+
+class ChapterDraft(BaseModel):
+    """Response schema for chapter-agent.
+
+    The number and title are already fixed by the curriculum, so the model is asked only
+    for what it alone can produce. Whatever it returns is fitted back onto its outline.
+    """
+
+    sections: list[ChapterSection] = Field(
+        description=(
+            "Three to six sections in reading order. The first must show the learner "
+            "something concrete; the last must leave them able to do the objectives."
+        )
+    )
+    key_points: list[str] = Field(
+        description=(
+            "Three to six one-line takeaways worth revising later. State facts and rules, "
+            "not a table of contents of the chapter."
+        )
+    )
+    exercises: list[str] = Field(
+        description=(
+            "Two to four tasks the learner performs themselves, each one checkable by "
+            "looking at the result. Give the task only, never the answer."
+        )
+    )
+
+
 class Chapter(BaseModel):
+    """A written chapter: its outline's number and title, plus the drafted content."""
+
     number: int
     title: str
     body_markdown: str
