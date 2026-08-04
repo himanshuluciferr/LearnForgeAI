@@ -2,7 +2,7 @@
 
 Agents and deterministic functions are registered as executors and connected by
 edges: requirement -> skill-analysis -> research -> curriculum -> chapter
--> practice -> project -> quiz -> interview -> review -> publisher.
+-> practice -> project -> quiz -> review -> publisher.
 
 review uses a conditional edge, looping back when the quality score is too low.
 """

@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from backend.agents import chapter as chapter_module
+from backend.agents.fanout import MAX_ATTEMPTS
 from backend.agents.chapter import (
     MAX_CONCURRENT_CHAPTERS,
     MAX_WORDS,
@@ -302,7 +303,8 @@ async def test_a_failure_does_not_cancel_the_other_chapters(monkeypatch):
     with pytest.raises(ValueError):
         await write_chapters(make_request(), curriculum, [])
 
-    assert len(agent.prompts) == 5
+    # Four chapters once each, plus chapter 3 exhausting its retries.
+    assert len(agent.prompts) == 4 + MAX_ATTEMPTS
 
 
 # --- wiring ------------------------------------------------------------------------

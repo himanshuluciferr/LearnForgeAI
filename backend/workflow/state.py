@@ -26,7 +26,6 @@ class WorkflowStep(StrEnum):
     PRACTICE = "practice"
     PROJECT = "project"
     QUIZ = "quiz"
-    INTERVIEW = "interview"
     REVIEW = "review"
     PUBLISHER = "publisher"
 
@@ -43,8 +42,8 @@ STEP_WEIGHTS: dict[WorkflowStep, int] = {
     WorkflowStep.PRACTICE: 8,
     WorkflowStep.PROJECT: 10,
     WorkflowStep.QUIZ: 8,
-    WorkflowStep.INTERVIEW: 6,
-    WorkflowStep.REVIEW: 5,
+    # Reads the whole course back in one call, so it costs more than the 5 it started with.
+    WorkflowStep.REVIEW: 11,
     WorkflowStep.PUBLISHER: 3,
 }
 
@@ -420,12 +419,6 @@ class Quiz(BaseModel):
     questions: list[QuizQuestion]
 
 
-class InterviewQuestion(BaseModel):
-    level: ExperienceLevel
-    question: str
-    model_answer: str
-
-
 class ReviewResult(BaseModel):
     score: int
     issues: list[str] = Field(default_factory=list)
@@ -459,7 +452,6 @@ class CourseState(BaseModel):
     practice: list[PracticeItem] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
     quizzes: list[Quiz] = Field(default_factory=list)
-    interview: list[InterviewQuestion] = Field(default_factory=list)
     review: ReviewResult | None = None
     published: PublishedCourse | None = None
 

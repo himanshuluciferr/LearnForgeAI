@@ -16,9 +16,9 @@ An employee types this in Microsoft Teams:
 ```
 
 A few minutes later they get back a complete, quality-reviewed course: an outline,
-written chapters, practice exercises, portfolio projects, quizzes, and interview
-preparation. From then on they can ask follow-up questions and an AI mentor answers
-them **grounded in that specific course**, not from generic knowledge.
+written chapters, practice exercises, portfolio projects, and quizzes. From then on they
+can ask follow-up questions and an AI mentor answers them **grounded in that specific
+course**, not from generic knowledge.
 
 ### Why this is not just "call an LLM in a loop"
 
@@ -142,8 +142,7 @@ flowchart TD
     CH --> PRAC[practice]
     PRAC --> PROJ[project]
     PROJ --> QUIZ[quiz]
-    QUIZ --> INT[interview]
-    INT --> REV{review}
+    QUIZ --> REV{review}
     REV -->|score below 90 and revisions left| CH
     REV -->|passed| PUB[publisher]
     PUB --> DONE([course])
@@ -178,8 +177,8 @@ async def run(self, state: CourseState, ctx: WorkflowContext[CourseState]) -> No
 ```
 
 > ⚠️ **Verified: Agent Framework passes state by reference — there is no copy.**
-> Serial execution is safe. But `practice`, `project`, `quiz` and `interview` are
-> logically independent and tempting to run in parallel — doing so with a shared object
+> Serial execution is safe. But `practice`, `project` and `quiz` are logically
+> independent and tempting to run in parallel — doing so with a shared object
 > would race. Parallelising requires per-branch state objects plus a merge step. Flagged,
 > not yet designed.
 
@@ -192,9 +191,9 @@ the `WorkflowStep` string values, so `event.executor_id` maps straight to a prog
 |---|---|---|---|
 | requirement | 5 | project | 10 |
 | skill-analysis | 5 | quiz | 8 |
-| research | 10 | interview | 6 |
-| curriculum | 10 | review | 5 |
-| chapter | 30 | publisher | 3 |
+| research | 10 | review | 11 |
+| curriculum | 10 | publisher | 3 |
+| chapter | 30 | | |
 | practice | 8 | | |
 
 `chapter` is 30 because writing full prose for every chapter dominates the runtime.
@@ -204,7 +203,7 @@ the `WorkflowStep` string values, so `event.executor_id` maps straight to a prog
 ## 5. Agents
 
 An **agent** is an LLM with a job description: a name, a system prompt, a strict output
-schema, and optionally some tools. Ten agents form the graph, one (`publisher`) is
+schema, and optionally some tools. Nine agents form the graph, one (`publisher`) is
 deterministic and needs no LLM, and one (`mentor`) lives outside the graph entirely.
 
 | # | Agent | Reads from state | Writes to state | Status |
@@ -217,8 +216,7 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 6 | `practice-agent` | `chapters` | `practice` | ✅ |
 | 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | ✅ |
 | 8 | `quiz-agent` | `chapters` | `quizzes` | ✅ |
-| 9 | `interview-agent` | `curriculum`, `skill_analysis` | `interview` | 🚧 |
-| 10 | `review-agent` | everything | `review` | 🚧 |
+| 9 | `review-agent` | everything | `review` | 🚧 |
 | — | `publisher` (no LLM) | everything | `published` | 📋 |
 | — | `mentor-agent` (outside graph) | a published course | — | 🚧 |
 
@@ -347,8 +345,8 @@ emits the headings, because asking for one Markdown blob produced flat prose wit
 at all across every live chapter.
 
 A partial course is refused. If any chapter fails, the step raises and names the failed
-numbers, because a course silently missing chapter 3 still reads as finished. There is no
-retry yet, so a single transient rate-limit failure costs the whole step.
+numbers, because a course silently missing chapter 3 still reads as finished. A chapter is
+only counted as failed once it has exhausted the retries described below.
 
 ### 6. `practice-agent` ✅
 
@@ -384,6 +382,22 @@ re-teaching: the chapter's exercises are listed in the prompt and declared off l
 It was deliberately left duplicated until the third caller existed, so the shape is drawn
 from three real cases instead of guessed from one. `project-agent` is not per-chapter and
 does not use it.
+
+Because all three agents funnel through here, retry lives here too: `MAX_ATTEMPTS = 3` with
+exponential backoff. Two details matter more than the retry itself:
+
+- **The delay is jittered.** Four chapters throttled by the same 429 would otherwise all
+  wake at the same moment and re-create the burst that caused it.
+- **The semaphore is taken per attempt, not per chapter**, so a chapter waiting for a slot
+  never queues behind another chapter's backoff. A test pins the resulting call order.
+
+Bugs in our own code (`TypeError`, `KeyError`, …) are not retried — they fail identically
+three times and only burn time and tokens. `asyncio.CancelledError` is a `BaseException`,
+so `except Exception` lets cancellation through untouched.
+
+The framework wraps everything in `ChatClientException` and exposes no typed rate-limit
+error, so a service-supplied `Retry-After` cannot be honoured without depending on
+unverified internals. Backoff is blind by choice.
 
 ### 7. `project-agent` ✅
 
@@ -432,12 +446,7 @@ chapter made, the quiz checks the takeaways it landed.**
 A question with too few usable distractors is dropped rather than shipped; a quiz with no
 usable questions raises. Short is degraded, empty is broken.
 
-### 9. `interview-agent` 🚧
-
-Tiered interview questions with model answers, plus mock interviews. Closes the loop on the
-actual business goal: employees learning a skill in order to be hired or promoted into it.
-
-### 10. `review-agent` 🚧
+### 9. `review-agent` 🚧
 
 The quality gate, and the most important agent after `requirement`. Scores the course and
 returns `ReviewResult`:
@@ -520,8 +529,7 @@ class CourseState(BaseModel):
     practice: list[PracticeItem]                 # agent 6
     projects: list[Project]                      # agent 7
     quizzes: list[Quiz]                          # agent 8
-    interview: list[InterviewQuestion]           # agent 9
-    review: ReviewResult | None                  # agent 10
+    review: ReviewResult | None                  # agent 9
     published: PublishedCourse | None            # publisher
 
     completed_steps: list[WorkflowStep]          # drives percent
@@ -717,8 +725,8 @@ Real, tracked, and deliberately deferred:
 | 10 | **`curriculum-agent`** | ✅ |
 | 11 | Cosmos swap for jobs and courses | ✅ |
 | 12 | **`chapter-agent`** — the content core | ✅ |
-| 13 | `practice` ✅, `quiz` ✅, `project` ✅, `interview` | ⬅️ next |
-| 14 | `review-agent` + the regeneration loop | 📋 |
+| 13 | `practice` ✅, `quiz` ✅, `project` ✅ | ✅ |
+| 14 | `review-agent` + the regeneration loop | ⬅️ next |
 | 15 | `publisher` + Blob Storage export | 📋 |
 | 16 | Teams bot + Adaptive Cards | 📋 |
 | 17 | Mentor agent | 📋 |

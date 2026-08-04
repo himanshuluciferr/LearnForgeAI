@@ -44,7 +44,7 @@ executors connected by edges.
 
 ```
 requirement -> skill-analysis -> research -> curriculum -> chapter
-   -> practice -> project -> quiz -> interview -> review -> publisher
+   -> practice -> project -> quiz -> review -> publisher
 ```
 
 `review` is the conditional edge: a quality score below threshold loops back for
