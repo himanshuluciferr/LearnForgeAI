@@ -104,7 +104,7 @@ def assemble(draft: QuizDraft) -> QuizQuestion | None:
     )
 
 
-def build_quiz(scope: str, quiz_set: QuizSet) -> Quiz:
+def build_quiz(scope: str, quiz_set: QuizSet, chapter_number: int | None = None) -> Quiz:
     questions = [question for question in map(assemble, quiz_set.questions) if question]
 
     # A short quiz is degraded; a quiz nobody can take is broken.
@@ -115,7 +115,7 @@ def build_quiz(scope: str, quiz_set: QuizSet) -> Quiz:
     if dropped:
         logger.warning("quiz-agent: dropped %d unusable question(s) from %s", dropped, scope)
 
-    return Quiz(scope=scope, questions=questions)
+    return Quiz(scope=scope, questions=questions, chapter_number=chapter_number)
 
 
 def build_chapter_prompt(request: LearningRequest, chapter: Chapter) -> str:
@@ -155,7 +155,9 @@ def build_final_prompt(request: LearningRequest, chapters: list[Chapter]) -> str
 
 async def write_chapter_quiz(request: LearningRequest, chapter: Chapter) -> Quiz:
     response = await get_quiz_agent().run(build_chapter_prompt(request, chapter))
-    return build_quiz(f"Chapter {chapter.number}: {chapter.title}", response.value)
+    return build_quiz(
+        f"Chapter {chapter.number}: {chapter.title}", response.value, chapter.number
+    )
 
 
 async def write_final_quiz(request: LearningRequest, chapters: list[Chapter]) -> Quiz:

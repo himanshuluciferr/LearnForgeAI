@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     cosmos_endpoint: str = ""
     cosmos_database: str = "learnforge"
 
+    # Empty means the publisher renders the course but writes it to generated_courses/
+    # instead of uploading it, so local runs need no storage account.
+    blob_account_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

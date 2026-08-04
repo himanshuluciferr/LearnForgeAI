@@ -222,7 +222,7 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | ✅ |
 | 8 | `quiz-agent` | `chapters` | `quizzes` | ✅ |
 | 9 | `review-agent` | `chapters` + `curriculum` | `review` | ✅ |
-| — | `publisher` (no LLM) | everything | `published` | 📋 |
+| — | `publisher` (no LLM) | `curriculum`, `chapters`, `practice`, `projects`, `quizzes` | `published` | ✅ |
 | — | `mentor-agent` (outside graph) | a published course | — | 🚧 |
 
 ### 1. `requirement-agent` ✅
@@ -559,12 +559,72 @@ passed to it. They are all generated *from* chapter prose, so a sound chapter im
 derivatives, and the loop can only rewrite chapters anyway — but nothing checks that a quiz
 question's answer key is actually correct. That is the sharpest hole in the pipeline.
 
-### `publisher` 📋 — deterministic, no LLM
+### `publisher` ✅ — deterministic, no LLM
 
-Renders the finished course to Markdown / PDF / DOCX via the `exporter` skill, uploads to
-Blob Storage, returns URLs. **No model involved**, so it lives in
+Renders the finished course to a single Markdown document via the `exporter` skill, stores
+it, and records the link on `state.published`. **No model involved**, so it lives in
 [`backend/workflow/executors.py`](../backend/workflow/executors.py) with the other
-deterministic nodes rather than in `agents/`.
+deterministic nodes rather than in `agents/`. It is the terminal node, so it yields the
+finished state as the workflow's output.
+
+**How the document is laid out.** Grouped by chapter, not by artifact type: chapter prose,
+then its key points, its exercises, its practice tasks and its quiz. That is the order
+someone actually works through, and practice and quizzes already carry the chapter number
+they belong to. `Quiz.chapter_number` was added for exactly this — matching a quiz to a
+chapter by parsing its `scope` string would have coupled the exporter to a label written
+for display.
+
+**Answers are held back.** Practice solutions and quiz answers are collected into a single
+`## Answers` section at the end. A solution printed directly under its task is a solution
+the learner reads before attempting the task, which makes the exercise worthless.
+
+**Headings are demoted, but not inside code fences.** A chapter body already contains `##`
+headings, so they are pushed down one level to nest under the heading the exporter gives
+the chapter. The trap: a shell chapter is full of `# clone the repo` comment lines, and a
+naive regex turns them into headings. `demote_headings` tracks fence state and leaves
+fenced content alone.
+
+**Orphans are dropped.** A rewrite can remove a chapter, leaving practice and quizzes
+pointing at a number the document no longer has. Both are filtered against the chapter
+numbers actually present, so the answer key can never grow a heading for a chapter nobody
+can read.
+
+PDF and DOCX stay unimplemented — `pdf_url` and `docx_url` are left `None` rather than
+filled with the Markdown link. `weasyprint` needs GTK on Windows, which is a bigger
+detour than the format is currently worth.
+
+**Storage.** [`blob_storage.py`](../backend/services/blob_storage.py) is keyless like
+Cosmos: `DefaultAzureCredential` only, and the account has shared-key access switched off.
+That has a consequence — with no account key there is no service SAS, so read links are
+**user-delegation SAS** tokens signed with a key requested from Azure. The container is
+private and `allow-blob-public-access` is `false`: a course names the employee's own
+systems, so a guessable URL must return nothing.
+
+Two numbers were learned the hard way. Azure caps a user-delegation key at **seven days**
+and reports anything longer as `InvalidXmlNodeValue`, which reads like a serialisation bug
+rather than an expiry problem — the link lifetime is six days, with the key and the token
+sharing one window. And the window start is backdated five minutes, because a key that
+starts in the future is rejected outright and our clock can sit ahead of Azure's.
+
+[`artifact_store.py`](../backend/services/artifact_store.py) picks the implementation the
+same way `course_store.py` does: Blob when `BLOB_ACCOUNT_URL` is set, otherwise files under
+`generated_courses/`, so a local run needs no storage account at all.
+
+**Untrusted text in a structured document.** The renderer treats everything a model wrote
+as content, never as structure. Chapter bodies get their headings demoted so they nest
+under the chapter, skipping fenced code so `# clone the repo` stays a shell comment.
+Practice prompts and solutions get the opposite treatment — they are escaped, because a
+prompt that quotes a conflicted file arrives as plain prose containing `# Project X`, a row
+of `=` and `>>>>>>> feature-branch`, which Markdown reads as a heading, a *setext* heading
+and a block quote. The stray heading is the damaging one: it lands in the document outline
+above the chapter that contains it. Both behaviours were found by reading a real generated
+course, not by a fixture.
+
+**Shutdown.** Every service holding a cached client exposes a `close_*` coroutine, and
+[`lifespan`](../backend/main.py) calls all of them. `tests/test_lifespan.py` walks
+`backend.services` and fails if one exists that lifespan does not call — naming them by
+hand would pass on the day it was written and miss the next service, which is exactly how
+`close_blob_storage` came to be written and never wired up.
 
 ### `mentor-agent` 🚧 — outside the graph
 
@@ -600,7 +660,7 @@ spending tokens.
 | `quiz_generator` | quiz, practice | Question sets with correct answers | 🚧 |
 | `project_generator` | project-agent | Project scaffolds and milestones | ✅ |
 | `reviewer` | review-agent | Returns a quality score | ✅ |
-| `exporter` | publisher | Markdown → PDF / DOCX, upload | 🚧 |
+| `exporter` | publisher | Course → one Markdown document | ✅ |
 
 `code_generator` is the clearest case for the split: chapters need examples, practice needs
 starter code, projects need scaffolds. One skill, three callers.
@@ -696,7 +756,7 @@ diffed and reviewed without touching code — a non-developer can improve a prom
 **`backend/services/`** — All Azure SDK usage is confined here. Agents and skills never
 import an Azure SDK directly, so swapping a provider or faking one in tests touches one file.
 `foundry.py` ✅ · `job_store.py` ✅ · `course_store.py` ✅ · `cosmos.py` ✅ ·
-`blob_storage.py`, `ai_search.py` 🚧
+`blob_storage.py` ✅ · `artifact_store.py` ✅ · `ai_search.py` 🚧
 
 Both stores are **interfaces first, technology second**. Each now has two implementations
 behind a `Protocol` — Cosmos when `COSMOS_ENDPOINT` is set, in-memory/JSON files otherwise —
@@ -729,7 +789,7 @@ HTTP, so they can scale and deploy independently.
 | Microsoft Foundry | `gpt-5-mini` — every agent's model | ✅ live |
 | Azure AI Search | Grounding for research + mentor | 📋 |
 | Cosmos DB | Users, courses, progress, scores, chat history | ✅ |
-| Blob Storage | Published Markdown / PDF / DOCX | 📋 |
+| Blob Storage | Published course Markdown, private, user-delegation SAS links | ✅ |
 | Container Apps | Hosts backend + teams-bot | 📋 |
 
 ### Planned Cosmos containers
@@ -825,7 +885,7 @@ Real, tracked, and deliberately deferred:
 | 12 | **`chapter-agent`** — the content core | ✅ |
 | 13 | `practice` ✅, `quiz` ✅, `project` ✅ | ✅ |
 | 14 | `review-agent` + the regeneration loop | ✅ |
-| 15 | `publisher` + Blob Storage export | ⬅️ next |
+| 15 | `publisher` + Blob Storage export | ✅ |
 | 16 | Teams bot + Adaptive Cards | 📋 |
 | 17 | Mentor agent | 📋 |
 | 18 | Deploy to Container Apps | 📋 |

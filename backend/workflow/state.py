@@ -423,6 +423,8 @@ class Quiz(BaseModel):
 
     scope: str
     questions: list[QuizQuestion]
+    # None marks the final assessment. Carried as a field so nothing has to parse `scope`.
+    chapter_number: int | None = None
 
 
 class ChapterVerdict(BaseModel):

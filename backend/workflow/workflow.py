@@ -21,7 +21,7 @@ from backend.agents.requirement import RequirementExecutor
 from backend.agents.research import ResearchExecutor
 from backend.agents.review import ReviewExecutor
 from backend.agents.skill_analysis import SkillAnalysisExecutor
-from backend.workflow.executors import REJECTED_ID, RejectedExecutor
+from backend.workflow.executors import REJECTED_ID, PublisherExecutor, RejectedExecutor
 from backend.workflow.state import CourseState, WorkflowStep
 
 
@@ -48,6 +48,7 @@ def build_workflow() -> Workflow:
     project = ProjectExecutor(id=WorkflowStep.PROJECT)
     quiz = QuizExecutor(id=WorkflowStep.QUIZ)
     review = ReviewExecutor(id=WorkflowStep.REVIEW)
+    publisher = PublisherExecutor(id=WorkflowStep.PUBLISHER)
     rejected = RejectedExecutor(id=REJECTED_ID)
     return (
         WorkflowBuilder(start_executor=requirement)
@@ -71,5 +72,6 @@ def build_workflow() -> Workflow:
         )
         .add_edge(practice, project)
         .add_edge(project, quiz)
+        .add_edge(quiz, publisher)
         .build()
     )

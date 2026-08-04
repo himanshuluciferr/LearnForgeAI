@@ -18,6 +18,7 @@ from backend.agents import requirement as requirement_mod
 from backend.agents import research as research_mod
 from backend.agents import review as review_mod
 from backend.agents import skill_analysis as skill_mod
+from backend.workflow import executors as executors_mod
 from backend.workflow.state import (
     MAX_REVISIONS,
     Chapter,
@@ -57,6 +58,17 @@ def returning(value):
     return call
 
 
+class RecordingStore:
+    """Stands in for the artifact store so a graph run touches no disk and no network."""
+
+    def __init__(self) -> None:
+        self.puts: list[tuple[str, str, str, str]] = []
+
+    async def put(self, user_id: str, job_id: str, filename: str, content: str) -> str:
+        self.puts.append((user_id, job_id, filename, content))
+        return f"memory://{job_id}/{filename}"
+
+
 @pytest.fixture
 def stub_agents(monkeypatch):
     """Every model call replaced, so a whole course runs in milliseconds."""
@@ -69,6 +81,8 @@ def stub_agents(monkeypatch):
     monkeypatch.setattr(practice_mod, "set_practice", returning([]))
     monkeypatch.setattr(project_mod, "design_projects", returning([]))
     monkeypatch.setattr(quiz_mod, "build_quizzes", returning([]))
+    # Imported by value into executors, so the name has to be replaced where it is used.
+    monkeypatch.setattr(executors_mod, "artifact_store", RecordingStore())
 
 
 def failing_reviews(count: int):
@@ -101,8 +115,10 @@ async def run_graph(monkeypatch, rejections: int) -> tuple[CourseState, list[str
 async def test_a_clean_course_runs_every_step_once(stub_agents, monkeypatch):
     state, visited = await run_graph(monkeypatch, rejections=0)
 
-    assert visited == [str(step) for step in WorkflowStep if step != WorkflowStep.PUBLISHER]
+    assert visited == [str(step) for step in WorkflowStep]
     assert state.revision_count == 0
+    assert state.percent == 100
+    assert state.published is not None
 
 
 @pytest.mark.asyncio
@@ -124,7 +140,10 @@ async def test_a_course_the_reviewer_never_likes_still_finishes(stub_agents, mon
 
     assert state.revision_count == MAX_REVISIONS
     assert visited.count(str(WorkflowStep.QUIZ)) == 1
-    assert state.percent == 97
+    # A course that never reaches the bar is still published — the cap exists so the
+    # learner gets the best draft we managed, not nothing at all.
+    assert state.percent == 100
+    assert state.published is not None
 
 
 @pytest.mark.asyncio

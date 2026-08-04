@@ -6,9 +6,11 @@ store singletons can still be steered — they are chosen at import time.
 
 import os
 
-# .env now carries a real COSMOS_ENDPOINT, which would silently point the offline suite at
-# live Cosmos. A real environment variable outranks .env, so this pins tests to local stores.
+# .env now carries real endpoints, which would silently point the offline suite at live
+# Azure. A real environment variable outranks .env, so this pins tests to local stores.
+# Any new endpoint setting must be added here the day it lands in .env.
 os.environ["COSMOS_ENDPOINT"] = ""
+os.environ["BLOB_ACCOUNT_URL"] = ""
 
 import pytest  # noqa: E402
 
