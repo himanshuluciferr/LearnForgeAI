@@ -228,14 +228,65 @@ class Chapter(BaseModel):
     title: str
     body_markdown: str
     key_points: list[str] = Field(default_factory=list)
+    # Do-it-now tasks with no answer shipped. Anything with a worked answer is a PracticeItem.
     exercises: list[str] = Field(default_factory=list)
 
 
+class PracticeKind(StrEnum):
+    """Multiple choice is deliberately absent — machine-marked questions are quiz-agent's."""
+
+    RECALL = "recall"
+    APPLY = "apply"
+    BUILD = "build"
+    DIAGNOSE = "diagnose"
+
+
+class PracticeTask(BaseModel):
+    """Response shape for practice-agent. The chapter is already known, so it is attached
+    afterwards rather than asked for."""
+
+    kind: PracticeKind = Field(
+        description=(
+            "What the learner has to do: recall it from memory, apply it to a scenario, "
+            "build something, or diagnose something broken."
+        )
+    )
+    prompt: str = Field(
+        description=(
+            "The task, stated so the learner knows when they are done. Name the specific "
+            "thing to produce. Never offer options to choose between."
+        )
+    )
+    solution: str = Field(
+        description=(
+            "The worked answer, with the reasoning or the code, so a learner can mark "
+            "themselves. Never a single word and never just a restatement of the task."
+        )
+    )
+
+
+class PracticeSet(BaseModel):
+    """Response schema for practice-agent: one chapter's worth of practice."""
+
+    tasks: list[PracticeTask] = Field(
+        description=(
+            "One task per learning objective, in the order the objectives were given. "
+            "Vary the kind across the set rather than making them all recall."
+        )
+    )
+
+
 class PracticeItem(BaseModel):
+    """One practice task tied to a chapter.
+
+    Unlike a chapter exercise it always ships a worked solution; unlike a quiz question it
+    is judged by the learner rather than marked by the machine.
+    """
+
     chapter_number: int
-    kind: str
+    kind: PracticeKind
     prompt: str
-    solution: str | None = None
+    solution: str
 
 
 class Project(BaseModel):
@@ -255,6 +306,8 @@ class QuizQuestion(BaseModel):
 
 
 class Quiz(BaseModel):
+    """Machine-marked assessment. Anything that needs a human to judge it is a PracticeItem."""
+
     scope: str
     questions: list[QuizQuestion]
 

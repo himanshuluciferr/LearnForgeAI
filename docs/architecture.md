@@ -214,7 +214,7 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 3 | `research-agent` | `request`, `skill_analysis` | `research` | ✅ |
 | 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | ✅ |
 | 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | ✅ |
-| 6 | `practice-agent` | `chapters` | `practice` | 🚧 |
+| 6 | `practice-agent` | `chapters` | `practice` | ✅ |
 | 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | 🚧 |
 | 8 | `quiz-agent` | `chapters` | `quizzes` | 🚧 |
 | 9 | `interview-agent` | `curriculum`, `skill_analysis` | `interview` | 🚧 |
@@ -350,10 +350,30 @@ A partial course is refused. If any chapter fails, the step raises and names the
 numbers, because a course silently missing chapter 3 still reads as finished. There is no
 retry yet, so a single transient rate-limit failure costs the whole step.
 
-### 6. `practice-agent` 🚧
+### 6. `practice-agent` ✅
 
-Turns chapters into active recall: coding questions, assignments, exercises, MCQs. Reading
-a chapter feels like learning; being unable to answer a question about it proves you haven't.
+Turns chapters into active recall. Reading a chapter feels like learning; being unable to do
+something with it proves you weren't.
+
+Three different parts of the course could plausibly produce "a question", so they are
+separated on one axis — **who marks the answer** — and the types enforce it:
+
+| Produced by | Marked by | Ships an answer? |
+|---|---|---|
+| `Chapter.exercises` | nobody, it's a do-it-now nudge | no |
+| `PracticeItem` | the learner, against a worked solution | **yes, `solution: str` is required** |
+| `QuizQuestion` | the machine, via `correct_index` | through `correct_index` |
+
+So `PracticeKind` has no multiple-choice member: anything a machine can mark belongs to
+`quiz-agent`. The four kinds are `recall`, `apply`, `build` and `diagnose`.
+
+The shape mirrors `chapter-agent` — one call per chapter, four at a time, the same
+fail-loudly rule. Two things are computed rather than asked for: the task count is
+`plan_task_count()`, one per objective clamped to 2–4, and `chapter_number` is attached
+afterwards because we already know it.
+
+Overlap with the chapter's own exercises is prevented the same way `chapter-agent` prevents
+re-teaching: the chapter's exercises are listed in the prompt and declared off limits.
 
 ### 7. `project-agent` 🚧
 
@@ -650,7 +670,7 @@ Real, tracked, and deliberately deferred:
 | 10 | **`curriculum-agent`** | ✅ |
 | 11 | Cosmos swap for jobs and courses | ✅ |
 | 12 | **`chapter-agent`** — the content core | ✅ |
-| 13 | `practice`, `project`, `quiz`, `interview` | ⬅️ next |
+| 13 | `practice` ✅, `project`, `quiz`, `interview` | ⬅️ next |
 | 14 | `review-agent` + the regeneration loop | 📋 |
 | 15 | `publisher` + Blob Storage export | 📋 |
 | 16 | Teams bot + Adaptive Cards | 📋 |
