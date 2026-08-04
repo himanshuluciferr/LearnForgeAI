@@ -145,15 +145,34 @@ class ResearchBundle(BaseModel):
 
 
 class ChapterOutline(BaseModel):
-    number: int
-    title: str
-    objectives: list[str] = Field(default_factory=list)
+    """One planned chapter. The prose itself is written later by chapter-agent."""
+
+    number: int = Field(description="Position in the course, starting at 1.")
+    title: str = Field(
+        description=(
+            "What this chapter teaches, stated concretely. Name the actual topic rather "
+            "than using a placeholder like 'Introduction' or 'Getting Started'."
+        )
+    )
+    objectives: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Two to four things the learner can DO after this chapter. Start each with a "
+            "verb, and make them checkable — 'create an index' not 'understand indexing'."
+        ),
+    )
 
 
 class Curriculum(BaseModel):
-    title: str
-    summary: str
-    chapters: list[ChapterOutline]
+    """Output of curriculum-agent — the plan the whole course is built from."""
+
+    title: str = Field(description="Course title naming the skill and the outcome it leads to.")
+    summary: str = Field(
+        description="Two or three sentences on what the course covers and who it is for."
+    )
+    chapters: list[ChapterOutline] = Field(
+        description="Ordered chapters. Each must build on the previous ones, never repeat them."
+    )
 
 
 class Chapter(BaseModel):

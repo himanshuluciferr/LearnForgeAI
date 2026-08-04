@@ -212,7 +212,7 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 1 | `requirement-agent` | `prompt` | `request` | ✅ |
 | 2 | `skill-analysis-agent` | `request` | `skill_analysis` | ✅ |
 | 3 | `research-agent` | `request`, `skill_analysis` | `research` | ✅ |
-| 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | 🚧 |
+| 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | ✅ |
 | 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | 🚧 |
 | 6 | `practice-agent` | `chapters` | `practice` | 🚧 |
 | 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | 🚧 |
@@ -299,11 +299,26 @@ step is marked complete either way.
 **Not yet real web search.** The model proposes from memory and we filter. Swapping the
 propose step for a real search API or an Azure AI Search index is a change to one function.
 
-### 4. `curriculum-agent` 🚧
+### 4. `curriculum-agent` ✅
 
 Designs the chapter list: titles, ordering, learning objectives per chapter, paced against
 `daily_minutes`. A separate planning pass beats letting the chapter writer improvise,
 because a plan can be checked for coverage and progression before expensive prose is generated.
+
+Two numbers are computed rather than asked for. `plan_chapter_count()` derives the count from
+`estimated_hours / HOURS_PER_CHAPTER`, clamped to `MIN_CHAPTERS..MAX_CHAPTERS`, and the prompt
+states it as a fixed requirement. `tidy()` then trims to the cap and renumbers, so chapter
+numbers are ours. The cap matters beyond tidiness: `chapter-agent` writes prose per chapter,
+so `MAX_CHAPTERS` bounds the most expensive step in the graph.
+
+The failure modes are deliberately asymmetric. Empty research is survivable — `format_sources`
+turns it into an explicit instruction to stay conservative — but a curriculum with no chapters
+is not a degraded course, it is a broken one, so it raises.
+
+`starting_point()` is the level adaptation. A general prompt rule telling the model to skip
+orientation chapters for experienced learners was measurably ignored; replacing it with a
+computed, skill-specific instruction ("the learner already uses X, chapter 1 must start past
+that") removed the orientation chapter on the next run.
 
 ### 5. `chapter-agent` 🚧
 
@@ -483,11 +498,13 @@ diffed and reviewed without touching code — a non-developer can improve a prom
 
 **`backend/services/`** — All Azure SDK usage is confined here. Agents and skills never
 import an Azure SDK directly, so swapping a provider or faking one in tests touches one file.
-`foundry.py` ✅ · `job_store.py` ✅ (in-memory) · `course_store.py` ✅ (JSON files under
-`generated_courses/`) · `cosmos.py`, `blob_storage.py`, `ai_search.py` 🚧
+`foundry.py` ✅ · `job_store.py` ✅ · `course_store.py` ✅ · `cosmos.py` ✅ ·
+`blob_storage.py`, `ai_search.py` 🚧
 
-Both stores are **interfaces first, technology second**: callers only use `create/get/update`
-and `save/get`, so Cosmos replaces the class behind them without touching a single caller.
+Both stores are **interfaces first, technology second**. Each now has two implementations
+behind a `Protocol` — Cosmos when `COSMOS_ENDPOINT` is set, in-memory/JSON files otherwise —
+and the swap happens on one line at the bottom of each module. No caller changed.
+Local development and the whole offline test suite still need no Azure account.
 
 **`backend/schemas/` vs `backend/models/`** — A deliberate split. `schemas/` is the public
 API shape (what Teams sends and receives); `models/` is what we persist. Keeping them apart
@@ -514,7 +531,7 @@ HTTP, so they can scale and deploy independently.
 |---|---|---|
 | Microsoft Foundry | `gpt-5-mini` — every agent's model | ✅ live |
 | Azure AI Search | Grounding for research + mentor | 📋 |
-| Cosmos DB | Users, courses, progress, scores, chat history | 📋 |
+| Cosmos DB | Users, courses, progress, scores, chat history | ✅ |
 | Blob Storage | Published Markdown / PDF / DOCX | 📋 |
 | Container Apps | Hosts backend + teams-bot | 📋 |
 
@@ -522,18 +539,33 @@ HTTP, so they can scale and deploy independently.
 
 All partitioned by `/user_id`, because every read is scoped to one learner.
 
-| Container | Holds | Replaces |
-|---|---|---|
-| `jobs` | Generation runs and progress | `InMemoryJobStore` |
-| `courses` | The generated course | `FileCourseStore` |
-| `progress` | Chapters read, completion | — |
-| `quiz_results` | Answers and scores | — |
-| `chat_history` | Mentor conversations | — |
+| Container | Holds | Replaces | TTL |
+|---|---|---|---|
+| `jobs` | Generation runs and progress | `InMemoryJobStore` | 30 days |
+| `courses` | The generated course | `FileCourseStore` | none |
+| `progress` | Chapters read, completion | — | none |
+| `quiz_results` | Answers and scores | — | none |
+| `chat_history` | Mentor conversations | — | 90 days |
 
 The first two have data today and are already behind interfaces. The other three arrive
 with the features that produce them.
 
-**Auth is keyless.** `DefaultAzureCredential` everywhere; no secrets in `.env`.
+**Indexing is opt-in, not default.** Cosmos indexes every property unless told otherwise,
+and a `courses` document holds the entire `CourseState` — every chapter of prose. Indexing
+that would inflate write cost and storage for paths nothing ever filters on, so
+`infra/cosmos/courses-index.json` excludes `/*` and includes only `/user_id`, `/job_id`
+and `/created_at`, plus a composite index on `(user_id ASC, created_at DESC)` for the
+"my courses, newest first" list the Teams bot will need.
+
+**Auth is keyless.** `DefaultAzureCredential` everywhere; no secrets in `.env`. Note that
+Cosmos has a *second* RBAC system for the data plane: subscription `Owner` grants nothing
+there, and reads fail with 403 until the Cosmos DB Data Contributor role is assigned.
+`scripts/provision_cosmos.ps1` does that as its fourth step.
+
+The account is **serverless, in `eastus2`** — `eastus` refused new accounts with a capacity
+error. The script takes `-Location`, so a region swap is a flag rather than an edit.
+Measured cost of the two read shapes on the live account: a point read is **1.0 RU**, the
+cross-partition fallback **2.82 RU**, and that ratio only worsens as partitions multiply.
 
 Two traps already hit and worth recording:
 
@@ -591,9 +623,9 @@ Real, tracked, and deliberately deferred:
 | 7 | Course persistence + `GET /courses/{id}` | ✅ |
 | 8 | `skill-analysis-agent` — first agent-to-agent handoff | ✅ |
 | 9 | `research-agent` + source verification | ✅ |
-| 10 | **`curriculum-agent`** | ⬅️ next |
-| 11 | Cosmos swap for jobs and courses | 📋 |
-| 12 | `chapter-agent` — the content core | 📋 |
+| 10 | **`curriculum-agent`** | ✅ |
+| 11 | Cosmos swap for jobs and courses | ✅ |
+| 12 | `chapter-agent` — the content core | ⬅️ next |
 | 13 | `practice`, `project`, `quiz`, `interview` | 📋 |
 | 14 | `review-agent` + the regeneration loop | 📋 |
 | 15 | `publisher` + Blob Storage export | 📋 |

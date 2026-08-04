@@ -1,0 +1,18 @@
+{
+  "indexingMode": "consistent",
+  "automatic": true,
+  "includedPaths": [
+    { "path": "/user_id/?" },
+    { "path": "/job_id/?" },
+    { "path": "/created_at/?" }
+  ],
+  "excludedPaths": [
+    { "path": "/*" }
+  ],
+  "compositeIndexes": [
+    [
+      { "path": "/user_id", "order": "ascending" },
+      { "path": "/created_at", "order": "descending" }
+    ]
+  ]
+}

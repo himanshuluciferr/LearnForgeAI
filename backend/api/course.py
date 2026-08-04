@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
@@ -22,16 +23,17 @@ async def create_course(request: CourseRequest, tasks: BackgroundTasks) -> JobAc
     job = GenerationJob(id=str(uuid4()), user_id=request.user_id, prompt=request.prompt)
     await job_store.create(job)
     tasks.add_task(run_generation, job.id, request)
+    # user_id rides along so polling can be a point read; it routes, it does not authorise.
     return JobAccepted(
         job_id=job.id,
         status=job.status,
-        status_url=f"/courses/{job.id}/progress",
+        status_url=f"/courses/{job.id}/progress?user_id={quote(request.user_id)}",
     )
 
 
 @router.get("/{job_id}/progress")
-async def get_progress(job_id: str) -> JobProgress:
-    job = await job_store.get(job_id)
+async def get_progress(job_id: str, user_id: str | None = None) -> JobProgress:
+    job = await job_store.get(job_id, user_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return JobProgress(
@@ -46,8 +48,8 @@ async def get_progress(job_id: str) -> JobProgress:
 
 
 @router.get("/{course_id}")
-async def get_course(course_id: str) -> StoredCourse:
-    course = await course_store.get(course_id)
+async def get_course(course_id: str, user_id: str | None = None) -> StoredCourse:
+    course = await course_store.get(course_id, user_id)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course

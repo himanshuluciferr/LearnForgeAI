@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     foundry_project_endpoint: str = ""
     foundry_model_deployment_name: str = "gpt-5-mini"
 
+    # Empty endpoint means local development, which keeps the in-memory and file stores.
+    cosmos_endpoint: str = ""
+    cosmos_database: str = "learnforge"
+
 
 @lru_cache
 def get_settings() -> Settings:

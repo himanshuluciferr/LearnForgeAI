@@ -20,7 +20,11 @@ _STEP_IDS = {step.value for step in WorkflowStep}
 
 
 async def run_generation(job_id: str, request: CourseRequest) -> None:
-    await job_store.update(job_id, status=JobStatus.RUNNING, percent=0)
+    async def update(**fields) -> None:
+        # Every write carries the partition key, so no job update is a cross-partition query.
+        await job_store.update(job_id, user_id=request.user_id, **fields)
+
+    await update(status=JobStatus.RUNNING, percent=0)
 
     # Executors mutate this object in place, so it stays the source of truth for progress.
     state = CourseState(job_id=job_id, user_id=request.user_id, prompt=request.prompt)
@@ -29,16 +33,12 @@ async def run_generation(job_id: str, request: CourseRequest) -> None:
     try:
         async for event in build_workflow().run(state, stream=True):
             if event.type == "executor_completed" and str(event.executor_id) in _STEP_IDS:
-                await job_store.update(
-                    job_id,
-                    step=WorkflowStep(event.executor_id),
-                    percent=state.percent,
-                )
+                await update(step=WorkflowStep(event.executor_id), percent=state.percent)
             elif event.type == "output" and isinstance(event.data, Rejection):
                 rejection = event.data
 
         if rejection is not None:
-            await job_store.update(job_id, status=JobStatus.REJECTED, detail=rejection.message)
+            await update(status=JobStatus.REJECTED, detail=rejection.message)
         else:
             course = await course_store.save(
                 StoredCourse(
@@ -48,8 +48,7 @@ async def run_generation(job_id: str, request: CourseRequest) -> None:
                     state=state,
                 )
             )
-            await job_store.update(
-                job_id,
+            await update(
                 status=JobStatus.COMPLETED,
                 percent=state.percent,
                 course_id=course.id,
@@ -57,4 +56,4 @@ async def run_generation(job_id: str, request: CourseRequest) -> None:
     except Exception as exc:
         # The failure is recorded on the job, so it must not escape the background task.
         logger.exception("Generation job %s failed", job_id)
-        await job_store.update(job_id, status=JobStatus.FAILED, error=str(exc))
+        await update(status=JobStatus.FAILED, error=str(exc))

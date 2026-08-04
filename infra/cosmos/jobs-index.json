@@ -1,0 +1,12 @@
+{
+  "indexingMode": "consistent",
+  "automatic": true,
+  "includedPaths": [
+    { "path": "/user_id/?" },
+    { "path": "/status/?" },
+    { "path": "/created_at/?" }
+  ],
+  "excludedPaths": [
+    { "path": "/*" }
+  ]
+}

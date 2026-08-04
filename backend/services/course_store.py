@@ -1,17 +1,20 @@
 """Generated course persistence.
 
-JSON files under generated_courses/ for local development, which also makes each
-agent's output readable on disk. The Cosmos-backed implementation lands in
-cosmos.py; callers depend only on these methods.
+Cosmos when an endpoint is configured, otherwise JSON files under generated_courses/,
+which also keeps every agent's output readable on disk during development.
 """
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Protocol
 from uuid import UUID
 
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
 from backend.models.course import StoredCourse
+from backend.services.cosmos import COURSES, cosmos_enabled, get_container, to_document
 
 COURSES_DIR = Path(__file__).resolve().parents[2] / "generated_courses"
 
@@ -23,6 +26,12 @@ def _is_safe_id(course_id: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+class CourseStore(Protocol):
+    async def save(self, course: StoredCourse) -> StoredCourse: ...
+
+    async def get(self, course_id: str, user_id: str | None = None) -> StoredCourse | None: ...
 
 
 class FileCourseStore:
@@ -41,7 +50,7 @@ class FileCourseStore:
         await asyncio.to_thread(write)
         return course
 
-    async def get(self, course_id: str) -> StoredCourse | None:
+    async def get(self, course_id: str, user_id: str | None = None) -> StoredCourse | None:
         if not _is_safe_id(course_id):
             return None
 
@@ -50,7 +59,40 @@ class FileCourseStore:
             return path.read_text(encoding="utf-8") if path.is_file() else None
 
         raw = await asyncio.to_thread(read)
-        return StoredCourse.model_validate_json(raw) if raw is not None else None
+        if raw is None:
+            return None
+        course = StoredCourse.model_validate_json(raw)
+        # Mirrors a Cosmos point read, which cannot reach into another user's partition.
+        return None if user_id is not None and course.user_id != user_id else course
 
 
-course_store = FileCourseStore()
+class CosmosCourseStore:
+    """Partitioned by user_id, matching jobs, so one learner's data lives on one partition."""
+
+    async def save(self, course: StoredCourse) -> StoredCourse:
+        # upsert rather than create: a regenerated course keeps its id.
+        await get_container(COURSES).upsert_item(to_document(course))
+        return course
+
+    async def get(self, course_id: str, user_id: str | None = None) -> StoredCourse | None:
+        container = get_container(COURSES)
+        if user_id is not None:
+            try:
+                document = await container.read_item(course_id, partition_key=user_id)
+            except CosmosResourceNotFoundError:
+                return None
+        else:
+            found = [
+                item
+                async for item in container.query_items(
+                    "SELECT * FROM c WHERE c.id = @id",
+                    parameters=[{"name": "@id", "value": course_id}],
+                )
+            ]
+            if not found:
+                return None
+            document = found[0]
+        return StoredCourse.model_validate(document)
+
+
+course_store: CourseStore = CosmosCourseStore() if cosmos_enabled() else FileCourseStore()
