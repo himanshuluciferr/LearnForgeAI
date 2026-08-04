@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from functools import lru_cache
 
 from agent_framework import Agent, Executor, WorkflowContext, handler
 
+from backend.agents.fanout import per_chapter
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
 from backend.workflow.state import (
@@ -150,35 +150,12 @@ async def write_chapter(
 async def write_chapters(
     request: LearningRequest, curriculum: Curriculum, sources: list[ResearchSource]
 ) -> list[Chapter]:
-    """Chapters are written concurrently. That is safe because each task returns its own
-    Chapter and nothing shared is mutated — unlike a workflow fan-out, which would have
-    several executors writing the one CourseState.
-    """
-    limit = asyncio.Semaphore(MAX_CONCURRENT_CHAPTERS)
-
     async def write_one(outline: ChapterOutline) -> Chapter:
-        async with limit:
-            return await write_chapter(request, curriculum, outline, sources)
+        return await write_chapter(request, curriculum, outline, sources)
 
-    logger.info("chapter-agent: writing %d chapters", len(curriculum.chapters))
-    results = await asyncio.gather(
-        *(write_one(outline) for outline in curriculum.chapters), return_exceptions=True
+    return await per_chapter(
+        AGENT_NAME, curriculum.chapters, write_one, MAX_CONCURRENT_CHAPTERS
     )
-
-    chapters: list[Chapter] = []
-    failed: list[int] = []
-    for outline, result in zip(curriculum.chapters, results):
-        if isinstance(result, BaseException):
-            logger.error("chapter-agent: chapter %d failed: %s", outline.number, result)
-            failed.append(outline.number)
-        else:
-            chapters.append(result)
-
-    # A course with a hole in it still reads as finished, so a partial result is refused.
-    if failed:
-        raise ValueError(f"chapter-agent failed on chapters {failed}")
-
-    return chapters
 
 
 class ChapterExecutor(Executor):

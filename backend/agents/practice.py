@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from functools import lru_cache
 
 from agent_framework import Agent, Executor, WorkflowContext, handler
 
+from backend.agents.fanout import per_chapter
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
 from backend.workflow.state import (
@@ -101,31 +101,12 @@ async def set_practice(
     request: LearningRequest, curriculum: Curriculum, chapters: list[Chapter]
 ) -> list[PracticeItem]:
     outlines = {outline.number: outline for outline in curriculum.chapters}
-    limit = asyncio.Semaphore(MAX_CONCURRENT_SETS)
 
     async def write_one(chapter: Chapter) -> list[PracticeItem]:
-        async with limit:
-            return await write_practice_set(request, outlines[chapter.number], chapter)
+        return await write_practice_set(request, outlines[chapter.number], chapter)
 
-    logger.info("practice-agent: setting practice for %d chapters", len(chapters))
-    results = await asyncio.gather(
-        *(write_one(chapter) for chapter in chapters), return_exceptions=True
-    )
-
-    items: list[PracticeItem] = []
-    failed: list[int] = []
-    for chapter, result in zip(chapters, results):
-        if isinstance(result, BaseException):
-            logger.error("practice-agent: chapter %d failed: %s", chapter.number, result)
-            failed.append(chapter.number)
-        else:
-            items.extend(result)
-
-    # One chapter without practice reads as a bug to the learner, not as a choice.
-    if failed:
-        raise ValueError(f"practice-agent failed on chapters {failed}")
-
-    return items
+    per_set = await per_chapter(AGENT_NAME, chapters, write_one, MAX_CONCURRENT_SETS)
+    return [item for tasks in per_set for item in tasks]
 
 
 class PracticeExecutor(Executor):

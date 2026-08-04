@@ -14,6 +14,8 @@ from agent_framework import Workflow, WorkflowBuilder
 from backend.agents.chapter import ChapterExecutor
 from backend.agents.curriculum import CurriculumExecutor
 from backend.agents.practice import PracticeExecutor
+from backend.agents.project import ProjectExecutor
+from backend.agents.quiz import QuizExecutor
 from backend.agents.requirement import RequirementExecutor
 from backend.agents.research import ResearchExecutor
 from backend.agents.skill_analysis import SkillAnalysisExecutor
@@ -37,6 +39,8 @@ def build_workflow() -> Workflow:
     curriculum = CurriculumExecutor(id=WorkflowStep.CURRICULUM)
     chapter = ChapterExecutor(id=WorkflowStep.CHAPTER)
     practice = PracticeExecutor(id=WorkflowStep.PRACTICE)
+    project = ProjectExecutor(id=WorkflowStep.PROJECT)
+    quiz = QuizExecutor(id=WorkflowStep.QUIZ)
     rejected = RejectedExecutor(id=REJECTED_ID)
     return (
         WorkflowBuilder(start_executor=requirement)
@@ -47,5 +51,7 @@ def build_workflow() -> Workflow:
         .add_edge(research, curriculum)
         .add_edge(curriculum, chapter)
         .add_edge(chapter, practice)
+        .add_edge(practice, project)
+        .add_edge(project, quiz)
         .build()
     )

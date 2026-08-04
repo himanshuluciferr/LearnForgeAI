@@ -215,8 +215,8 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | ✅ |
 | 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | ✅ |
 | 6 | `practice-agent` | `chapters` | `practice` | ✅ |
-| 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | 🚧 |
-| 8 | `quiz-agent` | `chapters` | `quizzes` | 🚧 |
+| 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | ✅ |
+| 8 | `quiz-agent` | `chapters` | `quizzes` | ✅ |
 | 9 | `interview-agent` | `curriculum`, `skill_analysis` | `interview` | 🚧 |
 | 10 | `review-agent` | everything | `review` | 🚧 |
 | — | `publisher` (no LLM) | everything | `published` | 📋 |
@@ -375,15 +375,62 @@ afterwards because we already know it.
 Overlap with the chapter's own exercises is prevented the same way `chapter-agent` prevents
 re-teaching: the chapter's exercises are listed in the prompt and declared off limits.
 
-### 7. `project-agent` 🚧
+#### The shared fan-out
+
+`chapter`, `practice` and `quiz` all make one model call per chapter, so
+`backend/agents/fanout.py` holds `per_chapter()`: bounded by a semaphore, gathered with
+`return_exceptions=True`, all-or-nothing, failures named by chapter number.
+
+It was deliberately left duplicated until the third caller existed, so the shape is drawn
+from three real cases instead of guessed from one. `project-agent` is not per-chapter and
+does not use it.
+
+### 7. `project-agent` ✅
 
 Portfolio projects at beginner / intermediate / advanced level, each with features, folder
 structure, milestones and stretch goals. This is what makes a course show up on a CV.
 
-### 8. `quiz-agent` 🚧
+**One call, not three.** Chapters, practice and quizzes fan out because each unit is
+independent. The three projects are not independent — they are a ramp, and a ramp is a
+single design decision. Three separate calls would each reach for the most obvious project
+for the skill and return three variations of one idea. So `project-agent` is the one
+enrichment agent that does *not* use `per_chapter()`.
 
-Chapter quizzes, weekly quizzes, and a final assessment — scored and stored, so progress is
-measurable rather than self-reported.
+**Difficulty is position, not a field.** `LEVELS` fixes the rungs in order, and
+`assemble_all()` zips them onto the drafts, so the model is never asked which level a
+project is — the ninth thing computed rather than requested. Note that `Project.level` is
+how hard the project is *within this course*; how experienced the learner is stays on
+`LearningRequest.experience`.
+
+**The tree is drawn in code.** The model returns `files` as plain paths; `folder_structure()`
+builds a dict-of-dicts and renders the box-drawing characters. Lining up `├──` and `│` by
+hand is exactly the kind of formatting a model gets subtly wrong, and the paths behind it
+are not. A path ending in `/` is marked with `DIR_MARKER` so an empty folder is still drawn
+as a folder, and entries that are notes rather than names (`data/pdfs/ (place PDFs here)`,
+seen live) are dropped with their parent kept as a folder.
+
+### 8. `quiz-agent` ✅
+
+One quiz per chapter plus a final assessment that spans the course — the only part that can
+test whether two chapters were joined up. Scored and stored, so progress is measurable
+rather than self-reported.
+
+**The model is never asked for `correct_index`.** An index is a claim about a list the model
+has to hold in its head while writing it, and that claim is often wrong. It returns
+`correct_answer` as *text* plus `distractors`; `assemble()` builds the options, shuffles
+them, and computes the index. A question whose marked answer disagrees with its options is
+no longer expressible.
+
+The shuffle is seeded on the question text, so a question always renders identically while
+the answers still scatter. Without it every answer would sit at index 0, since that is where
+we put it.
+
+Question counts follow `key_points`, where practice follows `objectives`. Different anchors
+are what stop the two agents testing the same thing: **practice checks the promises the
+chapter made, the quiz checks the takeaways it landed.**
+
+A question with too few usable distractors is dropped rather than shipped; a quiz with no
+usable questions raises. Short is degraded, empty is broken.
 
 ### 9. `interview-agent` 🚧
 
@@ -444,7 +491,7 @@ spending tokens.
 | `code_generator` | chapter, practice, project | Runnable, idiomatic code samples | 🚧 |
 | `diagrams` | chapter-agent | Mermaid diagrams for concepts | 🚧 |
 | `quiz_generator` | quiz, practice | Question sets with correct answers | 🚧 |
-| `project_generator` | project-agent | Project scaffolds and milestones | 🚧 |
+| `project_generator` | project-agent | Project scaffolds and milestones | ✅ |
 | `reviewer` | review-agent | Returns a quality score | 🚧 |
 | `exporter` | publisher | Markdown → PDF / DOCX, upload | 🚧 |
 
@@ -670,7 +717,7 @@ Real, tracked, and deliberately deferred:
 | 10 | **`curriculum-agent`** | ✅ |
 | 11 | Cosmos swap for jobs and courses | ✅ |
 | 12 | **`chapter-agent`** — the content core | ✅ |
-| 13 | `practice` ✅, `project`, `quiz`, `interview` | ⬅️ next |
+| 13 | `practice` ✅, `quiz` ✅, `project` ✅, `interview` | ⬅️ next |
 | 14 | `review-agent` + the regeneration loop | 📋 |
 | 15 | `publisher` + Blob Storage export | 📋 |
 | 16 | Teams bot + Adaptive Cards | 📋 |

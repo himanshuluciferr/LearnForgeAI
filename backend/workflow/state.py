@@ -289,16 +289,124 @@ class PracticeItem(BaseModel):
     solution: str
 
 
+class ProjectDraft(BaseModel):
+    """One project in the ramp.
+
+    The difficulty is its position in the list, so it is not asked for, and the folder tree
+    is drawn from `files` rather than requested as ASCII art.
+    """
+
+    title: str = Field(
+        description=(
+            "What the thing is called, naming what it does. Not 'Practice Project 1' and "
+            "not a to-do list or a calculator unless the skill is genuinely about those."
+        )
+    )
+    summary: str = Field(
+        description=(
+            "One or two sentences a learner could put on a CV: what it does and what it "
+            "proves they can do."
+        )
+    )
+    features: list[str] = Field(
+        description=(
+            "Three to six things the finished project does, each observable by using it. "
+            "Every one must be buildable with what the course teaches."
+        )
+    )
+    files: list[str] = Field(
+        description=(
+            "Every file and folder in the project as a full path from the project root, "
+            "e.g. 'src/api/routes.py'. End folder paths with '/'. List them plainly, one "
+            "per entry — do not draw a tree."
+        )
+    )
+    milestones: list[str] = Field(
+        description=(
+            "Three to six steps in build order, each ending with something that runs. "
+            "Never 'set up the project' as a milestone on its own."
+        )
+    )
+    stretch_goals: list[str] = Field(
+        description=(
+            "Two to four extensions for a learner who finishes early, beyond what the "
+            "course covered."
+        )
+    )
+
+
+class ProjectPlan(BaseModel):
+    """Response schema for project-agent.
+
+    All the projects come from one call because they have to work as a ramp — separate calls
+    would each reach for the most obvious idea and produce three variations of it.
+    """
+
+    projects: list[ProjectDraft] = Field(
+        description=(
+            "Projects in increasing order of ambition, each a different kind of thing rather "
+            "than the previous one with more features."
+        )
+    )
+
+
 class Project(BaseModel):
+    """A portfolio project. `level` is how hard the project is within this course, not a
+    claim about the learner — that is `LearningRequest.experience`."""
+
     level: ExperienceLevel
     title: str
+    summary: str = ""
     features: list[str] = Field(default_factory=list)
     folder_structure: str = ""
     milestones: list[str] = Field(default_factory=list)
     stretch_goals: list[str] = Field(default_factory=list)
 
 
+class QuizDraft(BaseModel):
+    """Response shape for one quiz question.
+
+    The right answer is asked for as text, never as an index. An index is a claim about a
+    list the model has to keep in its head while writing it, and that claim is often wrong;
+    the text is a thing it already knows. We build the options and locate the answer.
+    """
+
+    question: str = Field(
+        description=(
+            "One question with a single defensible answer. Ask about what the chapter "
+            "taught, not about the chapter itself, and never say 'according to the text'."
+        )
+    )
+    correct_answer: str = Field(
+        description="The right answer, stated in full so it reads correctly on its own."
+    )
+    distractors: list[str] = Field(
+        description=(
+            "Three answers that are wrong but tempting: real mistakes a learner makes here. "
+            "Each must be the same kind of thing and a similar length as the right answer, "
+            "and none may be arguably correct."
+        )
+    )
+    explanation: str = Field(
+        description=(
+            "Why the right answer is right and why a learner picking a wrong one went "
+            "astray. Never mention option letters or positions."
+        )
+    )
+
+
+class QuizSet(BaseModel):
+    """Response schema for quiz-agent: the questions for one scope."""
+
+    questions: list[QuizDraft] = Field(
+        description="Questions in the order the material was taught, each testing a different point."
+    )
+
+
 class QuizQuestion(BaseModel):
+    """An assembled question. `correct_index` is computed when the options are shuffled,
+    so it cannot disagree with `options`."""
+
     question: str
     options: list[str]
     correct_index: int
