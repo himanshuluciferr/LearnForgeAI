@@ -11,7 +11,11 @@ from typing import Sequence
 
 from pydantic import BaseModel, Field
 
-PASSING_REVIEW_SCORE = 90
+# Placed below the reviewer's own noise, not at the top of the range. Reviewing one
+# unchanged chapter three times returned 82, 85 and 92, so a bar of 90 would have sent
+# good work back on a coin flip. Real chapters measured 82-95, a hollow one 10-15, so
+# anything in between separates them and 75 leaves room for a bad sample of good work.
+PASSING_REVIEW_SCORE = 75
 
 # Caps the review -> chapter regeneration loop so a persistently low score cannot spin forever.
 MAX_REVISIONS = 2
@@ -23,10 +27,12 @@ class WorkflowStep(StrEnum):
     RESEARCH = "research"
     CURRICULUM = "curriculum"
     CHAPTER = "chapter"
+    # Sits here, not at the end, so a rewrite loop does not drag practice, project and quiz
+    # round with it. They read finished chapters and only ever need to run once.
+    REVIEW = "review"
     PRACTICE = "practice"
     PROJECT = "project"
     QUIZ = "quiz"
-    REVIEW = "review"
     PUBLISHER = "publisher"
 
 
@@ -39,11 +45,11 @@ STEP_WEIGHTS: dict[WorkflowStep, int] = {
     WorkflowStep.RESEARCH: 10,
     WorkflowStep.CURRICULUM: 10,
     WorkflowStep.CHAPTER: 30,
+    # One call per chapter plus a whole-syllabus pass, so it costs more than the 5 it started with.
+    WorkflowStep.REVIEW: 11,
     WorkflowStep.PRACTICE: 8,
     WorkflowStep.PROJECT: 10,
     WorkflowStep.QUIZ: 8,
-    # Reads the whole course back in one call, so it costs more than the 5 it started with.
-    WorkflowStep.REVIEW: 11,
     WorkflowStep.PUBLISHER: 3,
 }
 
@@ -419,10 +425,50 @@ class Quiz(BaseModel):
     questions: list[QuizQuestion]
 
 
+class ChapterVerdict(BaseModel):
+    """Response shape for reviewing one chapter.
+
+    The chapter number is not asked for — we know which chapter we sent — and neither is
+    whether to rewrite it, which is a cost decision rather than a reading one.
+    """
+
+    score: int = Field(
+        description=(
+            "0-100 for this chapter alone. 90 or above means a learner could work through "
+            "it unaided. Judge what is actually on the page, not how important the topic is."
+        )
+    )
+    issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What a rewrite would have to fix, most serious first, each naming the "
+            "specific passage or the missing explanation. Leave this empty when the "
+            "chapter is sound — do not invent criticism to appear thorough."
+        ),
+    )
+
+
+class CourseVerdict(BaseModel):
+    """Response shape for the whole-course pass: the problems no single chapter can show."""
+
+    issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Problems only visible across chapters: a prerequisite that is never taught, "
+            "two chapters covering the same ground, or an order that uses something "
+            "before explaining it. Do not repeat faults contained in a single chapter. "
+            "Leave empty if the course holds together."
+        ),
+    )
+
+
 class ReviewResult(BaseModel):
     score: int
     issues: list[str] = Field(default_factory=list)
     regenerate_chapters: list[int] = Field(default_factory=list)
+
+    # Keyed by chapter number, so a rewrite can be told what was wrong with its last draft.
+    chapter_issues: dict[int, list[str]] = Field(default_factory=dict)
 
 
 class PublishedCourse(BaseModel):
@@ -465,9 +511,11 @@ class CourseState(BaseModel):
 
     @property
     def should_regenerate(self) -> bool:
+        """Keyed off the chapter list rather than the score, so the decision to loop and the
+        work that loop would do cannot disagree."""
         return (
             self.review is not None
-            and self.review.score < PASSING_REVIEW_SCORE
+            and bool(self.review.regenerate_chapters)
             and self.revision_count < MAX_REVISIONS
         )
 

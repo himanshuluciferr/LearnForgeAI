@@ -139,12 +139,12 @@ flowchart TD
     SKILL --> RES[research]
     RES --> CUR[curriculum]
     CUR --> CH[chapter]
-    CH --> PRAC[practice]
+    CH --> REV{review}
+    REV -->|weak chapters and revisions left| CH
+    REV -->|default| PRAC[practice]
     PRAC --> PROJ[project]
     PROJ --> QUIZ[quiz]
-    QUIZ --> REV{review}
-    REV -->|score below 90 and revisions left| CH
-    REV -->|passed| PUB[publisher]
+    QUIZ --> PUB[publisher]
     PUB --> DONE([course])
 
     style REJ fill:#f5f5f5
@@ -153,10 +153,15 @@ flowchart TD
 
 ### Two things worth understanding
 
-**The review loop.** `review-agent` scores the course out of 100. Below
-`PASSING_REVIEW_SCORE = 90`, the named weak chapters go back to `chapter-agent`.
-`MAX_REVISIONS = 2` caps this so a stubbornly low score can't spin forever. This single
-loop is the main reason output quality is decent rather than "first draft".
+**The review loop.** `review-agent` scores every chapter and averages them. Chapters below
+`PASSING_REVIEW_SCORE = 75` go back to `chapter-agent`, carrying the reviewer's objections
+with them. `MAX_REVISIONS = 2` caps this so a stubbornly low score can't spin forever. This
+single loop is the main reason output quality is decent rather than "first draft".
+
+Review sits **directly after `chapter`**, not at the end of the pipeline. Everything
+downstream (`practice`, `project`, `quiz`) is generated *from* finished chapter prose, so
+putting them inside the loop would re-pay for all of them on every revision. On a
+20-chapter course that is 42 wasted model calls per revision, 84 across both.
 
 **The rejection exit.** `requirement-agent` sets `is_learning_request: false` for
 off-topic prompts. A conditional edge routes those to a terminal node that yields a
@@ -216,7 +221,7 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | 6 | `practice-agent` | `chapters` | `practice` | ✅ |
 | 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | ✅ |
 | 8 | `quiz-agent` | `chapters` | `quizzes` | ✅ |
-| 9 | `review-agent` | everything | `review` | 🚧 |
+| 9 | `review-agent` | `chapters` + `curriculum` | `review` | ✅ |
 | — | `publisher` (no LLM) | everything | `published` | 📋 |
 | — | `mentor-agent` (outside graph) | a published course | — | 🚧 |
 
@@ -446,7 +451,7 @@ chapter made, the quiz checks the takeaways it landed.**
 A question with too few usable distractors is dropped rather than shipped; a quiz with no
 usable questions raises. Short is degraded, empty is broken.
 
-### 9. `review-agent` 🚧
+### 9. `review-agent` ✅
 
 The quality gate, and the most important agent after `requirement`. Scores the course and
 returns `ReviewResult`:
@@ -455,11 +460,104 @@ returns `ReviewResult`:
 class ReviewResult(BaseModel):
     score: int
     issues: list[str]
-    regenerate_chapters: list[int]   # which chapters to rewrite
+    regenerate_chapters: list[int]        # which chapters to rewrite
+    chapter_issues: dict[int, list[str]]  # why, so the rewrite can act on it
 ```
 
-`regenerate_chapters` is what makes the loop targeted — we rewrite the three weak chapters,
-not all twelve.
+**N+1 calls, not one giant prompt.** A twelve-chapter course is far more prose than one
+call can weigh evenly — the last chapters get skimmed. So each chapter is judged alone
+(fanned out through `per_chapter`, the fourth caller of that helper) and one extra call
+looks at the whole syllabus. That call is the only place cross-chapter faults can be seen.
+
+**The two calls are different agents** because they need different `response_format`s:
+`ChapterVerdict` (score + issues) and `CourseVerdict` (issues only).
+
+**Nothing is asked for that we already know or can compute.** `ChapterVerdict` has no
+`number` field — we know which chapter we sent. `score` for the course is the mean of the
+chapter scores rather than a separate question, so there is no second number free to
+disagree with the first. `regenerate_chapters` is derived from the scores, never asked
+for: judging a chapter and pricing a rewrite are different jobs.
+
+**The course pass is told it cannot see the chapters.** It is given titles and key points
+only. Stating "do not report faults inside a chapter" was ignored; naming the mechanism —
+*any claim about the prose is a guess about text you were not given, and it will send a
+sound chapter back for a fault it does not have* — stopped it.
+
+#### Where the bar came from
+
+`PASSING_REVIEW_SCORE` started at 90 and was wrong. Measured live:
+
+| what | scores |
+| --- | --- |
+| a good chapter, reviewed three times **unchanged** | 82, 85, 92 |
+| three more good chapters, three reviews each | 85–95, 86–95, 86–88 |
+| a deliberately hollow chapter | 10, 15, 15 |
+
+The reviewer separates good work from bad by about seventy points, but its precision on
+identical text is roughly ±5. A bar of 90 therefore sat *inside* the good band and sent
+sound chapters back on a coin flip — at roughly triple the cost. The bar is now **75**:
+far above anything a weak chapter scores, and below the reviewer's own noise floor.
+
+#### The loop
+
+```
+curriculum ──▶ chapter ──▶ review ─┐
+              ▲                │ needs revision
+              └────────────────┘
+                               │ default
+                               ▼
+                      practice ──▶ project ──▶ quiz ──▶ publisher
+```
+
+- `should_regenerate` keys off `regenerate_chapters` being non-empty, **not** off the
+  score. The decision to loop and the work that loop would do therefore cannot disagree —
+  a harsh average can never trigger a rewrite of nothing.
+- Rewrites carry `chapter_issues` into the prompt. Without them a "rewrite" is just a
+  fresh sample of the same prompt and comes back equally weak.
+- `splice()` drops rewritten chapters back into place; chapters that passed are untouched.
+- `revision_count` is incremented in `ChapterExecutor`, not in `ReviewExecutor`. This
+  matters: incrementing at review time means the count rises *before* the edge condition
+  re-evaluates `should_regenerate`, which yields one revision instead of two. Counting
+  where the rewrite actually happens gives exactly `MAX_REVISIONS` loops.
+
+#### ⚠️ Why review routes with a switch-case, not two conditional edges
+
+The obvious wiring is two `add_edge` calls out of `review` with opposite conditions. It is
+wrong, and it fails silently.
+
+MAF evaluates sibling edge conditions **one at a time, delivering each before evaluating
+the next** — and delivery runs the whole downstream chain. Because `CourseState` is passed
+**by reference**, `chapter` increments `revision_count` *between* the two evaluations.
+Traced on a real run:
+
+```
+[needs_revision] -> True   (rev_count=1)
+[is_good_enough] -> True   (rev_count=2)   <- same message, both branches taken
+```
+
+The course went down both edges. `practice`, `project` and `quiz` each ran **twice**, in
+two interleaved chains. Every offline test passed throughout — the graph *shape* was
+correct, only its behaviour was not.
+
+`add_switch_case_edge_group` fixes it properly: its `selection_func` is called **once** per
+message and returns exactly one target, so all conditions are evaluated in a single
+synchronous pass before anything is delivered. The pass branch is a `Default`, which means
+there is no second condition that could drift out of step with the first.
+
+**The general rule:** with a mutable message shared by reference, two "exactly opposite"
+conditions are not mutually exclusive. Use switch-case whenever a branch can be re-entered.
+
+Regression cover lives in
+[tests/workflow/test_workflow_loop.py](../tests/workflow/test_workflow_loop.py), which runs
+the real graph with every model call stubbed and asserts the tail runs exactly once.
+
+**Known cost:** a revision re-runs only the flagged chapters, plus a full re-review. Nothing
+downstream is repeated.
+
+**Known gap:** review reads **chapters only**. Practice, projects and quizzes are never
+passed to it. They are all generated *from* chapter prose, so a sound chapter implies sound
+derivatives, and the loop can only rewrite chapters anyway — but nothing checks that a quiz
+question's answer key is actually correct. That is the sharpest hole in the pipeline.
 
 ### `publisher` 📋 — deterministic, no LLM
 
@@ -501,7 +599,7 @@ spending tokens.
 | `diagrams` | chapter-agent | Mermaid diagrams for concepts | 🚧 |
 | `quiz_generator` | quiz, practice | Question sets with correct answers | 🚧 |
 | `project_generator` | project-agent | Project scaffolds and milestones | ✅ |
-| `reviewer` | review-agent | Returns a quality score | 🚧 |
+| `reviewer` | review-agent | Returns a quality score | ✅ |
 | `exporter` | publisher | Markdown → PDF / DOCX, upload | 🚧 |
 
 `code_generator` is the clearest case for the split: chapters need examples, practice needs
@@ -726,8 +824,8 @@ Real, tracked, and deliberately deferred:
 | 11 | Cosmos swap for jobs and courses | ✅ |
 | 12 | **`chapter-agent`** — the content core | ✅ |
 | 13 | `practice` ✅, `quiz` ✅, `project` ✅ | ✅ |
-| 14 | `review-agent` + the regeneration loop | ⬅️ next |
-| 15 | `publisher` + Blob Storage export | 📋 |
+| 14 | `review-agent` + the regeneration loop | ✅ |
+| 15 | `publisher` + Blob Storage export | ⬅️ next |
 | 16 | Teams bot + Adaptive Cards | 📋 |
 | 17 | Mentor agent | 📋 |
 | 18 | Deploy to Container Apps | 📋 |

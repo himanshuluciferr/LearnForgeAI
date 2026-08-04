@@ -18,6 +18,8 @@ from backend.agents.chapter import (
     covered_so_far,
     format_sources,
     render_body,
+    rewrite_chapters,
+    splice,
     target_words,
     write_chapter,
     write_chapters,
@@ -33,6 +35,7 @@ from backend.workflow.state import (
     LearningRequest,
     ResearchSource,
     ResourceKind,
+    ReviewResult,
     WorkflowStep,
     progress_percent,
 )
@@ -327,6 +330,108 @@ async def test_executor_stores_the_chapters_and_forwards_state(monkeypatch):
     assert len(state.chapters) == 1
     assert WorkflowStep.CHAPTER in state.completed_steps
     assert ctx.messages == [state]
+
+
+# --- regeneration ------------------------------------------------------------------
+
+
+def written(number: int, body: str = "original") -> Chapter:
+    return Chapter(number=number, title=f"Chapter topic {number}", body_markdown=body)
+
+
+def test_splice_replaces_only_what_was_rewritten():
+    existing = [written(1), written(2), written(3)]
+
+    result = splice(existing, [written(2, "rewritten")])
+
+    assert [chapter.body_markdown for chapter in result] == ["original", "rewritten", "original"]
+
+
+def test_splice_keeps_the_chapters_in_order():
+    existing = [written(1), written(2), written(3)]
+
+    result = splice(existing, [written(3, "c"), written(1, "a")])
+
+    assert [chapter.number for chapter in result] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_only_the_flagged_chapters_are_rewritten(monkeypatch):
+    agent = use_stub(monkeypatch, StubAgent())
+    review = ReviewResult(score=60, regenerate_chapters=[2])
+
+    await rewrite_chapters(make_request(), make_curriculum(4), [], review)
+
+    assert len(agent.prompts) == 1
+    assert "Write chapter 2 of" in agent.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_is_told_what_the_reviewer_objected_to(monkeypatch):
+    """Without the issues the rewrite is a fresh sample of the same prompt."""
+    agent = use_stub(monkeypatch, StubAgent())
+    review = ReviewResult(
+        score=60, regenerate_chapters=[1], chapter_issues={1: ["no worked example"]}
+    )
+
+    await rewrite_chapters(make_request(), make_curriculum(2), [], review)
+
+    assert "no worked example" in agent.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_a_first_draft_is_never_told_it_was_rejected(monkeypatch):
+    agent = use_stub(monkeypatch, StubAgent())
+
+    await write_chapters(make_request(), make_curriculum(1), [])
+
+    assert "rejected" not in agent.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_the_executor_rewrites_instead_of_starting_over(monkeypatch):
+    agent = use_stub(monkeypatch, StubAgent())
+    state = CourseState(job_id="j", user_id="u", prompt="p")
+    state.request = make_request()
+    state.curriculum = make_curriculum(3)
+    state.chapters = [written(1), written(2), written(3)]
+    state.review = ReviewResult(score=60, regenerate_chapters=[2])
+
+    await ChapterExecutor(id=WorkflowStep.CHAPTER).run(state, CapturingContext())
+
+    assert len(agent.prompts) == 1
+    assert [chapter.number for chapter in state.chapters] == [1, 2, 3]
+    assert state.chapters[0].body_markdown == "original"
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_counts_against_the_revision_cap(monkeypatch):
+    """Counted where the work happens, so the cap counts rewrites actually performed."""
+    use_stub(monkeypatch, StubAgent())
+    state = CourseState(job_id="j", user_id="u", prompt="p")
+    state.request = make_request()
+    state.curriculum = make_curriculum(2)
+    state.chapters = [written(1), written(2)]
+    state.review = ReviewResult(score=60, regenerate_chapters=[1])
+
+    await ChapterExecutor(id=WorkflowStep.CHAPTER).run(state, CapturingContext())
+
+    assert state.revision_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_passing_review_does_not_make_the_executor_rewrite(monkeypatch):
+    agent = use_stub(monkeypatch, StubAgent())
+    state = CourseState(job_id="j", user_id="u", prompt="p")
+    state.request = make_request()
+    state.curriculum = make_curriculum(2)
+    state.chapters = [written(1), written(2)]
+    state.review = ReviewResult(score=95, regenerate_chapters=[])
+
+    await ChapterExecutor(id=WorkflowStep.CHAPTER).run(state, CapturingContext())
+
+    assert len(agent.prompts) == 2
+    assert state.revision_count == 0
 
 
 def test_progress_reaches_sixty_percent_once_chapters_are_written():

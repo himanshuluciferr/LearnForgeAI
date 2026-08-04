@@ -19,6 +19,7 @@ from backend.workflow.state import (
     Curriculum,
     LearningRequest,
     ResearchSource,
+    ReviewResult,
     WorkflowStep,
 )
 
@@ -90,11 +91,23 @@ def coming_later(curriculum: Curriculum, outline: ChapterOutline) -> str:
     return f"Reserved for later chapters. Mention in passing at most, never teach:\n{titles}"
 
 
+def format_issues(issues: list[str]) -> str:
+    """Without this the rewrite is a fresh sample of the same prompt and comes back as weak."""
+    if not issues:
+        return ""
+    listed = "\n".join(f"- {issue}" for issue in issues)
+    return (
+        "\n\nA reviewer rejected your previous draft of this chapter. Fix every one of "
+        f"these in the rewrite:\n{listed}"
+    )
+
+
 def build_prompt(
     request: LearningRequest,
     curriculum: Curriculum,
     outline: ChapterOutline,
     sources: list[ResearchSource],
+    issues: list[str] | None = None,
 ) -> str:
     objectives = "\n".join(f"- {objective}" for objective in outline.objectives) or "- not stated"
     return (
@@ -109,6 +122,7 @@ def build_prompt(
         f"{covered_so_far(curriculum, outline)}\n\n"
         f"{coming_later(curriculum, outline)}\n\n"
         f"Sources you may draw on:\n{format_sources(sources)}"
+        f"{format_issues(issues or [])}"
     )
 
 
@@ -137,8 +151,11 @@ async def write_chapter(
     curriculum: Curriculum,
     outline: ChapterOutline,
     sources: list[ResearchSource],
+    issues: list[str] | None = None,
 ) -> Chapter:
-    response = await get_chapter_agent().run(build_prompt(request, curriculum, outline, sources))
+    response = await get_chapter_agent().run(
+        build_prompt(request, curriculum, outline, sources, issues)
+    )
     draft: ChapterDraft = response.value
 
     if not any(section.markdown.strip() for section in draft.sections):
@@ -158,13 +175,49 @@ async def write_chapters(
     )
 
 
+async def rewrite_chapters(
+    request: LearningRequest,
+    curriculum: Curriculum,
+    sources: list[ResearchSource],
+    review: ReviewResult,
+) -> list[Chapter]:
+    """Rewrite only the chapters the review flagged, each told what was wrong with it."""
+    targets = set(review.regenerate_chapters)
+    outlines = [outline for outline in curriculum.chapters if outline.number in targets]
+
+    async def write_one(outline: ChapterOutline) -> Chapter:
+        return await write_chapter(
+            request, curriculum, outline, sources, review.chapter_issues.get(outline.number, [])
+        )
+
+    return await per_chapter(AGENT_NAME, outlines, write_one, MAX_CONCURRENT_CHAPTERS)
+
+
+def splice(existing: list[Chapter], rewritten: list[Chapter]) -> list[Chapter]:
+    """Drop rewrites back into place, leaving the chapters that passed untouched."""
+    replaced = {chapter.number: chapter for chapter in rewritten}
+    return [replaced.get(chapter.number, chapter) for chapter in existing]
+
+
 class ChapterExecutor(Executor):
     """Graph node for chapter-agent."""
 
     @handler
     async def run(self, state: CourseState, ctx: WorkflowContext[CourseState]) -> None:
         assert state.request is not None and state.curriculum is not None
-        state.chapters = await write_chapters(state.request, state.curriculum, state.research)
+
+        if state.review is not None and state.review.regenerate_chapters:
+            # Counted here, not in review, so the cap counts rewrites actually performed.
+            state.revision_count += 1
+            rewritten = await rewrite_chapters(
+                state.request, state.curriculum, state.research, state.review
+            )
+            state.chapters = splice(state.chapters, rewritten)
+        else:
+            state.chapters = await write_chapters(
+                state.request, state.curriculum, state.research
+            )
+
         state.mark(WorkflowStep.CHAPTER)
         await ctx.send_message(state)
 
