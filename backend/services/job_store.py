@@ -39,6 +39,7 @@ class JobStore(Protocol):
         step: WorkflowStep | None = None,
         percent: int | None = None,
         detail: str | None = None,
+        options: list[str] | None = None,
         error: str | None = None,
         course_id: str | None = None,
     ) -> GenerationJob | None: ...
@@ -74,6 +75,7 @@ class InMemoryJobStore:
         step: WorkflowStep | None = None,
         percent: int | None = None,
         detail: str | None = None,
+        options: list[str] | None = None,
         error: str | None = None,
         course_id: str | None = None,
     ) -> GenerationJob | None:
@@ -88,6 +90,7 @@ class InMemoryJobStore:
                     "step": step,
                     "percent": percent,
                     "detail": detail,
+                    "options": options,
                     "error": error,
                     "course_id": course_id,
                 },
@@ -133,6 +136,7 @@ class CosmosJobStore:
         step: WorkflowStep | None = None,
         percent: int | None = None,
         detail: str | None = None,
+        options: list[str] | None = None,
         error: str | None = None,
         course_id: str | None = None,
     ) -> GenerationJob | None:
@@ -147,6 +151,7 @@ class CosmosJobStore:
                 "step": step,
                 "percent": percent,
                 "detail": detail,
+                "options": options,
                 "error": error,
                 "course_id": course_id,
             },

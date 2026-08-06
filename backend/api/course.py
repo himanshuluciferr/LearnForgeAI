@@ -42,6 +42,7 @@ async def get_progress(job_id: str, user_id: str | None = None) -> JobProgress:
         step=job.step,
         percent=job.percent,
         detail=job.detail,
+        options=job.options,
         error=job.error,
         course_id=job.course_id,
     )

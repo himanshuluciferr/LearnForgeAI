@@ -6,9 +6,16 @@ from agent_framework import Executor, WorkflowContext, handler
 
 from backend.services.artifact_store import artifact_store
 from backend.skills.exporter.skill import render_course
-from backend.workflow.state import CourseState, PublishedCourse, Rejection, WorkflowStep
+from backend.workflow.state import (
+    Clarification,
+    CourseState,
+    PublishedCourse,
+    Rejection,
+    WorkflowStep,
+)
 
 REJECTED_ID = "rejected"
+CLARIFY_ID = "clarify"
 
 MARKDOWN_FILENAME = "course.md"
 
@@ -16,6 +23,29 @@ REJECTION_MESSAGE = (
     "I couldn't tell what you'd like to learn. Try something like "
     '"Teach me Azure AI Search, 30 minutes a day".'
 )
+
+
+def choice_message(options: list[str]) -> str:
+    return (
+        f"You mentioned {', '.join(options[:-1])} and {options[-1]}, so I don't know which "
+        "course to build. Ask me again naming just one."
+    )
+
+
+class ClarifyExecutor(Executor):
+    """Terminal node for a learner who named several skills and chose none.
+
+    It stops before the expensive half rather than picking for them, so the cost of asking
+    is one model call instead of a whole course on the wrong subject.
+    """
+
+    @handler
+    async def run(
+        self, state: CourseState, ctx: WorkflowContext[CourseState, Clarification]
+    ) -> None:
+        assert state.request is not None
+        options = state.request.alternatives
+        await ctx.yield_output(Clarification(message=choice_message(options), options=options))
 
 
 class RejectedExecutor(Executor):

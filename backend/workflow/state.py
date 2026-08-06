@@ -84,6 +84,15 @@ class LearningRequest(BaseModel):
     language: str = Field(
         default="en", description="ISO 639-1 code for the course language, e.g. 'en', 'hi'. Not the language name."
     )
+    alternatives: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every skill the learner offered as an alternative to the others without choosing, "
+            "as in 'React or Vue'. Include the one you put in `skill`. Leave this empty when "
+            "they named a single skill, or several that belong in one course such as "
+            "'React with TypeScript'."
+        ),
+    )
 
 
 class SkillAnalysis(BaseModel):
@@ -483,6 +492,17 @@ class Rejection(BaseModel):
     """Terminal result when the prompt was not a request to learn something."""
 
     message: str
+
+
+class Clarification(BaseModel):
+    """Terminal result when the learner named several skills and chose none of them.
+
+    Kept apart from Rejection: we understood the message and can help, we just must not
+    guess which course they wanted.
+    """
+
+    message: str
+    options: list[str]
 
 
 class CourseState(BaseModel):

@@ -21,16 +21,22 @@ from backend.agents.requirement import RequirementExecutor
 from backend.agents.research import ResearchExecutor
 from backend.agents.review import ReviewExecutor
 from backend.agents.skill_analysis import SkillAnalysisExecutor
-from backend.workflow.executors import REJECTED_ID, PublisherExecutor, RejectedExecutor
+from backend.workflow.executors import (
+    CLARIFY_ID,
+    REJECTED_ID,
+    ClarifyExecutor,
+    PublisherExecutor,
+    RejectedExecutor,
+)
 from backend.workflow.state import CourseState, WorkflowStep
-
-
-def _is_learning_request(state: CourseState) -> bool:
-    return state.request is not None and state.request.is_learning_request
 
 
 def _is_not_learning_request(state: CourseState) -> bool:
     return state.request is not None and not state.request.is_learning_request
+
+
+def _named_several_skills(state: CourseState) -> bool:
+    return state.request is not None and len(state.request.alternatives) > 1
 
 
 def _needs_revision(state: CourseState) -> bool:
@@ -50,11 +56,19 @@ def build_workflow() -> Workflow:
     review = ReviewExecutor(id=WorkflowStep.REVIEW)
     publisher = PublisherExecutor(id=WorkflowStep.PUBLISHER)
     rejected = RejectedExecutor(id=REJECTED_ID)
+    clarify = ClarifyExecutor(id=CLARIFY_ID)
     return (
         WorkflowBuilder(start_executor=requirement)
-        # Both edges leave requirement, so the conditions must be exact opposites.
-        .add_edge(requirement, skill_analysis, condition=_is_learning_request)
-        .add_edge(requirement, rejected, condition=_is_not_learning_request)
+        # Switch-case rather than three sibling conditions: it evaluates once and returns one
+        # target, so the branches cannot overlap or leave a message with nowhere to go.
+        .add_switch_case_edge_group(
+            requirement,
+            [
+                Case(condition=_is_not_learning_request, target=rejected),
+                Case(condition=_named_several_skills, target=clarify),
+                Default(target=skill_analysis),
+            ],
+        )
         .add_edge(skill_analysis, research)
         .add_edge(research, curriculum)
         .add_edge(curriculum, chapter)

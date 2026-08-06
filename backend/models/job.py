@@ -20,6 +20,8 @@ class JobStatus(StrEnum):
     FAILED = "failed"
     # The prompt wasn't a learning request. Not an error, so it is kept apart from FAILED.
     REJECTED = "rejected"
+    # The learner named several skills and chose none. Answerable by asking again.
+    NEEDS_CHOICE = "needs-choice"
 
 
 def _now() -> datetime:
@@ -34,6 +36,8 @@ class GenerationJob(BaseModel):
     step: WorkflowStep | None = None
     percent: int = 0
     detail: str | None = None
+    # Kept as data rather than only inside `detail`, so a card can offer them as buttons.
+    options: list[str] = Field(default_factory=list)
     error: str | None = None
     course_id: str | None = None
     created_at: datetime = Field(default_factory=_now)

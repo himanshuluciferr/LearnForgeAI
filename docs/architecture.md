@@ -119,10 +119,16 @@ sequenceDiagram
 | `completed` | Course published |
 | `failed` | Something broke — `error` field explains |
 | `rejected` | Prompt wasn't a learning request. **Not an error**, so kept separate from `failed` |
+| `needs-choice` | The learner named several skills and picked none. `options` lists them |
 
 `rejected` exists because "what's the weather in Pune?" is a perfectly valid thing for a
 user to type at a bot. Treating it as a failure would produce a scary error message for
 ordinary small talk.
+
+`needs-choice` is separate again: we understood the message and can help, we just must not
+guess. "Teach me React or maybe Vue" is a question, and answering it with a course is a
+decision the learner never made. The options are stored as a **list**, not only inside the
+sentence, so a card can offer them as buttons without re-parsing prose.
 
 ---
 
@@ -133,9 +139,10 @@ agent (or one deterministic step).
 
 ```mermaid
 flowchart TD
-    START([prompt]) --> REQ[requirement]
+    START([prompt]) --> REQ{requirement}
     REQ -->|not a learning request| REJ([rejected])
-    REQ --> SKILL[skill-analysis]
+    REQ -->|named several, chose none| CLAR([clarify])
+    REQ -->|default| SKILL[skill-analysis]
     SKILL --> RES[research]
     RES --> CUR[curriculum]
     CUR --> CH[chapter]
@@ -148,6 +155,8 @@ flowchart TD
     PUB --> DONE([course])
 
     style REJ fill:#f5f5f5
+    style CLAR fill:#f5f5f5
+    style REQ fill:#fff4ce
     style REV fill:#fff4ce
 ```
 
@@ -163,10 +172,22 @@ downstream (`practice`, `project`, `quiz`) is generated *from* finished chapter 
 putting them inside the loop would re-pay for all of them on every revision. On a
 20-chapter course that is 42 wasted model calls per revision, 84 across both.
 
-**The rejection exit.** `requirement-agent` sets `is_learning_request: false` for
-off-topic prompts. A conditional edge routes those to a terminal node that yields a
-friendly message. Verified live: when a conditional edge's condition is false, the
-message is simply dropped and the workflow **terminates cleanly** — it does not hang.
+**The two early exits.** `requirement` routes through a **switch-case group**, the same
+construct `review` uses, with `skill-analysis` as the `Default`:
+
+- `is_learning_request: false` → `rejected`, a friendly "I couldn't tell what you'd like
+  to learn".
+- more than one entry in `alternatives` → `clarify`, which names the options and asks the
+  learner to pick.
+
+Both land at **5%**, after a single model call and before anything is generated. Asking
+costs one call; guessing costs a whole course on a subject nobody chose.
+
+Switch-case rather than three sibling conditions for two reasons. Sibling conditional edges
+are evaluated one at a time and delivered before the next is tested — the bug that made the
+review loop run its tail twice. And with three branches, "the conditions are exact
+opposites" stops being checkable by eye; `Default` makes it structural, so no prompt can
+fall through to no branch at all.
 
 ### State-as-message
 
@@ -240,8 +261,9 @@ Output — [`LearningRequest`](../backend/workflow/state.py):
 | `goal` | What they want to be able to *do* |
 | `daily_minutes` | 5–480, drives course pacing |
 | `language` | ISO 639-1 code — `"hi"`, not `"Hindi"` |
+| `alternatives` | Skills offered as a choice and never chosen between |
 
-Two design points that turned out to matter a lot:
+Three design points that turned out to matter a lot:
 
 - **Only `is_learning_request` is required; everything else defaults.** The model is
   never forced to invent a skill for a prompt that has none. This is what stops
@@ -249,6 +271,12 @@ Two design points that turned out to matter a lot:
 - **Pydantic `Field(description=...)` is the real prompt.** The descriptions become the
   JSON schema the model sees. The `language='English'` bug was fixed purely by writing
   *"ISO 639-1 code… not the language name"* in a field description — no prompt text changed.
+- **`alternatives` exists because this is the only node that can see the choice.**
+  Downstream nodes read `skill: str`, a single string — so once this agent picks one of
+  *"React or maybe Vue"*, the fact that Vue was ever mentioned is gone for good. Measured
+  live: *"React or maybe Vue"*, *"either Terraform or Bicep"* and *"python or java or go"*
+  all populate it; *"React with TypeScript"* and *"Azure Functions and how to deploy them"*
+  correctly do not, because those belong in one course. 9 of 9 on the first run.
 
 Verified live on four cases including Hindi input and an off-topic prompt.
 
@@ -270,8 +298,9 @@ Two things this node pinned down:
   text editor" for Markdown. Fixed in the field description, not the prompt — same
   lesson as the `language` bug.
 
-Because it has a sibling edge to `rejected`, both edges out of `requirement` carry
-conditions that are exact opposites; a test enforces that they can never both fire.
+It is reached by the `Default` branch of `requirement`'s switch-case, so it runs for every
+prompt that neither early exit claimed. A test asserts the two exit conditions can never
+both fire for the same request.
 
 ### 3. `research-agent` ✅
 

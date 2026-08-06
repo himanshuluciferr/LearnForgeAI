@@ -13,7 +13,7 @@ from backend.workflow.state import (
     SkillAnalysis,
     WorkflowStep,
 )
-from backend.workflow.workflow import _is_learning_request, _is_not_learning_request
+from backend.workflow.workflow import _is_not_learning_request, _named_several_skills
 
 
 class CapturingContext:
@@ -91,13 +91,29 @@ async def test_executor_reads_the_request_and_stores_the_analysis(monkeypatch):
     ("request_", "expected"),
     [
         (None, (False, False)),
-        (LearningRequest(is_learning_request=True, skill="Rust"), (True, False)),
-        (LearningRequest(is_learning_request=False), (False, True)),
+        (LearningRequest(is_learning_request=True, skill="Rust"), (False, False)),
+        (LearningRequest(is_learning_request=False), (True, False)),
+        (
+            LearningRequest(is_learning_request=True, skill="Vue", alternatives=["React", "Vue"]),
+            (False, True),
+        ),
     ],
-    ids=["not-yet-extracted", "learning-request", "off-topic"],
+    ids=["not-yet-extracted", "clear-request", "off-topic", "unanswered-choice"],
 )
-def test_the_two_edges_out_of_requirement_never_both_fire(request_, expected):
-    """Both edges leave the same node, so exactly one must match at a time."""
+def test_at_most_one_early_exit_claims_a_request(request_, expected):
+    """The default route carries anything neither case claims, so overlap is the only danger."""
     state = CourseState(job_id="j1", user_id="u1", prompt="p", request=request_)
 
-    assert (_is_learning_request(state), _is_not_learning_request(state)) == expected
+    assert (_is_not_learning_request(state), _named_several_skills(state)) == expected
+
+
+def test_naming_one_alternative_is_not_a_choice_to_make():
+    """A single entry means the model listed something it had already settled on."""
+    state = CourseState(
+        job_id="j1",
+        user_id="u1",
+        prompt="p",
+        request=LearningRequest(is_learning_request=True, skill="Vue", alternatives=["Vue"]),
+    )
+
+    assert not _named_several_skills(state)

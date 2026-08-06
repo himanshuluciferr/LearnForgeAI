@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from agent_framework import SwitchCaseEdgeGroup
 
-from backend.workflow.executors import REJECTED_ID
+from backend.workflow.executors import CLARIFY_ID, REJECTED_ID
 from backend.workflow.state import WorkflowStep
 from backend.workflow.workflow import build_workflow
 
@@ -27,14 +27,22 @@ def edges() -> set[tuple[str, str, str | None]]:
     }
 
 
-def review_cases() -> list[tuple[str | None, str]]:
-    """review's switch-case branches in evaluation order, as (condition name, target)."""
+def cases_out_of(source: str) -> list[tuple[str | None, str]]:
+    """One node's switch-case branches in evaluation order, as (condition name, target).
+
+    Scoped by source: more than one node routes this way, and merging their groups would
+    let a change to either quietly satisfy the other's test.
+    """
     return [
         (getattr(case, "condition_name", None), case.target_id)
         for group in build_workflow().edge_groups
-        if isinstance(group, SwitchCaseEdgeGroup)
+        if isinstance(group, SwitchCaseEdgeGroup) and source in group.source_executor_ids
         for case in group.cases
     ]
+
+
+def review_cases() -> list[tuple[str | None, str]]:
+    return cases_out_of(str(WorkflowStep.REVIEW))
 
 
 def test_every_step_hands_to_the_next_one():
@@ -90,14 +98,30 @@ def test_practice_project_and_quiz_sit_outside_the_rewrite_loop():
 
 
 def test_a_rejected_prompt_leaves_the_pipeline_immediately():
-    declared = edges()
+    assert cases_out_of(str(WorkflowStep.REQUIREMENT))[0] == (
+        "_is_not_learning_request",
+        REJECTED_ID,
+    )
 
-    assert (str(WorkflowStep.REQUIREMENT), REJECTED_ID, "_is_not_learning_request") in declared
-    assert (
-        str(WorkflowStep.REQUIREMENT),
+
+def test_an_unanswered_choice_stops_before_anything_is_generated():
+    """Picking one silently is the failure this branch exists to prevent."""
+    assert ("_named_several_skills", CLARIFY_ID) in cases_out_of(str(WorkflowStep.REQUIREMENT))
+
+
+def test_a_clear_request_is_the_default_route():
+    """Default rather than a third condition, so no prompt can fall through to no branch."""
+    assert cases_out_of(str(WorkflowStep.REQUIREMENT))[-1] == (
+        None,
         str(WorkflowStep.SKILL_ANALYSIS),
-        "_is_learning_request",
-    ) in declared
+    )
+
+
+def test_neither_early_exit_can_reach_the_rest_of_the_pipeline():
+    """Both are terminal: a course must never be built after we said we could not build one."""
+    assert not [
+        (source, target) for source, target, _ in edges() if source in {REJECTED_ID, CLARIFY_ID}
+    ]
 
 
 def test_review_can_send_the_course_back_to_be_rewritten():
