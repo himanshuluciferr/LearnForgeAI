@@ -27,6 +27,8 @@ from backend.workflow.state import (
     Curriculum,
     ExperienceLevel,
     LearningRequest,
+    ResearchSource,
+    ResourceKind,
     ReviewResult,
     SkillAnalysis,
     WorkflowStep,
@@ -49,6 +51,16 @@ REQUEST = LearningRequest(
 ANALYSIS = SkillAnalysis(
     category="Cloud", difficulty=ExperienceLevel.BEGINNER, estimated_hours=10
 )
+# On topic, because research now refuses to hand an ungrounded course to the rest of the graph.
+SOURCES = [
+    ResearchSource(
+        title="t",
+        url="https://learn.microsoft.com/azure/",
+        kind=ResourceKind.DOCS,
+        summary="s",
+        mentions_skill=True,
+    )
+]
 
 
 def returning(value):
@@ -74,7 +86,7 @@ def stub_agents(monkeypatch):
     """Every model call replaced, so a whole course runs in milliseconds."""
     monkeypatch.setattr(requirement_mod, "extract_requirement", returning(REQUEST))
     monkeypatch.setattr(skill_mod, "analyse_skill", returning(ANALYSIS))
-    monkeypatch.setattr(research_mod, "gather_sources", returning([]))
+    monkeypatch.setattr(research_mod, "gather_sources", returning(SOURCES))
     monkeypatch.setattr(curriculum_mod, "plan_curriculum", returning(CURRICULUM))
     monkeypatch.setattr(chapter_mod, "write_chapters", returning(CHAPTERS))
     monkeypatch.setattr(chapter_mod, "rewrite_chapters", returning(CHAPTERS[:1]))

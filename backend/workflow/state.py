@@ -139,13 +139,26 @@ class ResearchSource(BaseModel):
     rank_score: float = Field(
         default=0.0, description="Ignored on input — the ranking step overwrites it."
     )
+    mentions_skill: bool = Field(
+        default=False, description="Ignored on input — the verification step overwrites it."
+    )
 
 
-class ResearchBundle(BaseModel):
-    """Response schema for research-agent. Structured output needs an object at the root."""
+class SourcePick(BaseModel):
+    """One page the research agent wants to keep, chosen from real search results."""
 
-    sources: list[ResearchSource] = Field(
-        description="Sources covering the skill from first steps through to advanced use."
+    index: int = Field(description="Number of the page in the list you were given.")
+    kind: ResourceKind = Field(description="What sort of resource this is.")
+    summary: str = Field(
+        description="One or two sentences: what this source covers and when it helps."
+    )
+
+
+class SourceSelection(BaseModel):
+    """Response schema for research-agent. It picks from real pages and never writes a URL."""
+
+    picks: list[SourcePick] = Field(
+        description="The pages worth building the course on, most useful first."
     )
 
 
