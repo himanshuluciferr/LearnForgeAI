@@ -275,74 +275,32 @@ conditions that are exact opposites; a test enforces that they can never both fi
 
 ### 3. `research-agent` ✅
 
-Gathers trusted sources — official docs, Microsoft Learn, GitHub. This is the **grounding**
-step: it exists so chapters are written from real, citable material instead of the model's
-recollection.
+Gathers trusted sources — official docs, Microsoft Learn, GitHub, reputable blogs. This is
+the **grounding** step: it exists so chapters are written from real, citable material
+instead of the model's recollection.
 
 Unlike the first two agents it is a **pipeline, not a single call**:
 
-1. **Search** — `services/web_search.py` queries Microsoft Learn and GitHub for the skill
-   **as the learner named it**. No model involved.
-2. **Select** — the model picks from that numbered list (`SourceSelection`). It returns
-   *indexes*, never URLs, so a mistyped link cannot reach the course.
-3. **Verify** — the `research` skill fetches each page, drops the dead ones, and records
-   whether the page actually **names the skill** (`mentions_skill`). Deterministic.
-4. **Confirm** — if no verified source names the skill, the job **fails loudly**.
-5. **Rank** — the `ranking` skill scores by source kind and sorts best-first.
+1. **Propose** — the model suggests six to eight sources (`ResearchBundle`).
+2. **Verify** — the `research` skill fetches every URL and discards anything that does not
+   answer. Deterministic, no model involved.
+3. **Rank** — the `ranking` skill scores by source kind and sorts best-first.
 
-#### Why the model no longer supplies URLs
+Step 2 is not optional. On the first live run the model proposed
+`https://learn.microsoft.com/rest/api/search/` — a perfectly plausible Microsoft Learn URL
+that returns **404**. Across runs roughly a third of proposed links were dead. A citation
+the learner cannot open is worse than no citation, because it looks authoritative.
 
-A real run of *"Teach me Microsoft Agent Framework"* produced a twenty-chapter course on
-**Bot Framework**. The drift happened at step 2 of the graph, not step 3:
-`skill-analysis-agent` returned `category: "Conversational AI / Bot Development"` and
-prerequisites naming the *Bot Framework SDK*. Research then dutifully proposed seven Bot
-Framework pages. Every one was live, so verification passed. Review scored it 80/100 —
-it grades teaching quality, and the teaching was fine. It was simply the wrong subject.
+> ⚠️ **These URLs are attacker-influenced input.** The model chooses them and our server
+> fetches them, which is a textbook SSRF path. `is_fetchable()` requires `https` and
+> rejects loopback, private, link-local and reserved addresses — including the cloud
+> metadata endpoint `169.254.169.254` — before any request leaves the process.
 
-Asked the same question outside a schema, the model answers honestly: *"I'm not certain
-that a product called 'Microsoft Agent Framework' exists."* Inside a Pydantic response
-format it has no such option.
+An empty result is a valid outcome: an ungrounded course still beats a failed job, so the
+step is marked complete either way.
 
-> **A required field is a demand for an answer.** A schema has no "I don't know" branch, so
-> a model facing an unknown proper noun returns the nearest neighbour from its training. The
-> structure that makes output reliable is exactly what makes this failure silent.
-
-Three fixes follow from that:
-
-- **Search for the skill, never the category.** `analysis.category` is the field the model
-  corrupts when it has not heard of the skill; the query uses `request.skill` verbatim.
-- **Check relevance, not just reachability.** A `200` proves a page exists, never that it is
-  on topic. Measured: all seven Bot Framework pages score `mentions_skill=False`.
-- **Refuse rather than guess.** `confirm_on_topic()` raises when nothing names the skill,
-  and the error carries the evidence: how many sources, and what they were about instead.
-
-Two measured details that look like over-thinking and are not:
-
-- The official page is titled **"Agent Framework documentation"** and never spells out the
-  vendor. Strict matching rejected the single best source. `wanted_phrases()` also accepts
-  the name minus a leading vendor word — verified to keep all seven wrong pages at `False`.
-- GitHub's default ranking reads README text, so sample repositories bury the canonical one.
-  `microsoft/agent-framework` (12,590★) is **absent** from both best-match and `sort=stars`
-  results, and ranks **first** under `in:name,description`. `search_github` runs both passes.
-
-> ⚠️ **These URLs are attacker-influenced input.** Our server fetches pages a model chose,
-> which is a textbook SSRF path. `is_fetchable()` requires `https` and rejects loopback,
-> private, link-local and reserved addresses — including the cloud metadata endpoint
-> `169.254.169.254` — before any request leaves the process. `read_page()` streams and stops
-> at `MAX_CHARS`, so an endless response cannot exhaust memory.
-
-**Coverage is honest, not complete.** Search is Microsoft Learn plus GitHub. That is strong
-for Microsoft and open-source topics and thin for *"Teach me Excel"*. Both endpoints are
-keyless, free, and return a stable candidate list we can index into.
-
-Foundry also offers a **GA hosted web search** — `FoundryChatClient.get_web_search_tool()`,
-Microsoft-managed Bing, no Azure setup, verified working on `gpt-5-mini`. It reaches blogs
-and vendor sites our two providers cannot, and returns real `url_citation` annotations rather
-than model-typed links. It is not wired in yet, for three reasons worth weighing first:
-the model writes its own queries, the cited set is whatever it chose to cite (so there is no
-fixed list to select from by index), and **search data flows outside the Azure compliance
-boundary**. The natural role is a third provider feeding the same verify → confirm → rank
-path, not a replacement for it.
+**Not yet real web search.** The model proposes from memory and we filter. Swapping the
+propose step for a real search API or an Azure AI Search index is a change to one function.
 
 ### 4. `curriculum-agent` ✅
 
@@ -694,8 +652,8 @@ spending tokens.
 
 | Skill | Used by | What it does | Status |
 |---|---|---|---|
-| `research` | research-agent | Fetches candidate sources, drops dead links, flags off-topic ones | ✅ |
-| `ranking` | research-agent | Scores/orders sources by trust and relevance | ✅ |
+| `research` | research-agent | Fetches candidate sources | 🚧 |
+| `ranking` | research-agent | Scores/orders sources by trust and relevance | 🚧 |
 | `chapter_writer` | chapter-agent | Long-form chapter prose | 🚧 |
 | `code_generator` | chapter, practice, project | Runnable, idiomatic code samples | 🚧 |
 | `diagrams` | chapter-agent | Mermaid diagrams for concepts | 🚧 |
@@ -798,7 +756,7 @@ diffed and reviewed without touching code — a non-developer can improve a prom
 **`backend/services/`** — All Azure SDK usage is confined here. Agents and skills never
 import an Azure SDK directly, so swapping a provider or faking one in tests touches one file.
 `foundry.py` ✅ · `job_store.py` ✅ · `course_store.py` ✅ · `cosmos.py` ✅ ·
-`blob_storage.py` ✅ · `artifact_store.py` ✅ · `web_search.py` ✅ · `ai_search.py` 🚧
+`blob_storage.py` ✅ · `artifact_store.py` ✅ · `ai_search.py` 🚧
 
 Both stores are **interfaces first, technology second**. Each now has two implementations
 behind a `Protocol` — Cosmos when `COSMOS_ENDPOINT` is set, in-memory/JSON files otherwise —
@@ -906,14 +864,6 @@ Real, tracked, and deliberately deferred:
 6. **No auth on the backend** — Teams identity is trusted but not yet verified. `GET
    /courses/{id}` currently returns any course to any caller; ownership is stored
    (`user_id`) but not enforced.
-7. **Review never checks the subject** — it grades teaching quality only, and scored a
-   wrong-topic course 80/100. Grounding now catches this earlier (§5.3), but the reviewer
-   itself still cannot tell you the course is about the wrong thing.
-8. **Search covers Microsoft Learn and GitHub only** — thin for general tutorials and
-   non-Microsoft topics. Foundry's GA hosted web search (`get_web_search_tool()`) is the
-   obvious third provider; see §5.3 for the trade-offs that have kept it out so far.
-9. **Nobody reviews course size** — the wrong-topic run estimated 150 hours, which capped
-   out at 20 chapters: roughly ten months at the learner's stated 30 minutes a day.
 
 ---
 

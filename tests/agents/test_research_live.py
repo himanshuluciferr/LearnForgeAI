@@ -57,7 +57,3 @@ async def test_sources_arrive_best_first(sources):
 
 async def test_every_source_explains_itself(sources):
     assert all(source.title and len(source.summary) > 20 for source in sources)
-
-
-async def test_the_pages_are_about_the_skill_that_was_asked_for(sources):
-    assert any(source.mentions_skill for source in sources)
