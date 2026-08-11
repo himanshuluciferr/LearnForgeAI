@@ -43,7 +43,7 @@ def build_prompt(request: LearningRequest, analysis: SkillAnalysis) -> str:
         f"Skill: {request.skill}\n"
         f"Field: {analysis.category}\n"
         f"Skill difficulty: {analysis.difficulty}\n"
-        f"Learner's current level: {request.experience}\n"
+        f"Learner's current level: {request.assumed_level}\n"
         f"Goal: {request.goal or 'not stated'}\n"
         f"Assumed prerequisites: {prerequisites}\n"
         f"Course size: about {analysis.estimated_hours} hours"

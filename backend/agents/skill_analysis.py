@@ -26,9 +26,9 @@ def build_prompt(request: LearningRequest) -> str:
     """This agent reads requirement-agent's output, never the raw Teams message."""
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's current level: {request.experience}\n"
+        f"Learner's current level: {request.assumed_level}\n"
         f"Goal: {request.goal or 'not stated'}\n"
-        f"Time available: {request.daily_minutes} minutes per day"
+        f"Time available: {request.minutes_per_day} minutes per day"
     )
 
 

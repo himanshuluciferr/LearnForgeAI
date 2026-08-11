@@ -35,8 +35,17 @@ def _is_not_learning_request(state: CourseState) -> bool:
     return state.request is not None and not state.request.is_learning_request
 
 
-def _named_several_skills(state: CourseState) -> bool:
-    return state.request is not None and len(state.request.alternatives) > 1
+def _needs_clarification(state: CourseState) -> bool:
+    """One signal for every reason node 1 cannot hand a subject downstream.
+
+    `missing_requirements` is what the agent itself reports; the other two are the same
+    conclusion read off the data, so a model that fills the fields but forgets the flag
+    still stops here instead of building a course on nothing.
+    """
+    request = state.request
+    if request is None or not request.is_learning_request:
+        return False
+    return bool(request.missing_requirements) or len(request.alternatives) > 1 or not request.skill
 
 
 def _needs_revision(state: CourseState) -> bool:
@@ -65,7 +74,7 @@ def build_workflow() -> Workflow:
             requirement,
             [
                 Case(condition=_is_not_learning_request, target=rejected),
-                Case(condition=_named_several_skills, target=clarify),
+                Case(condition=_needs_clarification, target=clarify),
                 Default(target=skill_analysis),
             ],
         )

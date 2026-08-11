@@ -61,7 +61,7 @@ def build_prompt(request: LearningRequest, outline: ChapterOutline, chapter: Cha
     key_points = "\n".join(f"- {point}" for point in chapter.key_points) or "- none"
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's level: {request.experience}\n"
+        f"Learner's level: {request.assumed_level}\n"
         f"Course language: {request.language}\n"
         f"Produce exactly {plan_task_count(outline.objectives)} tasks.\n\n"
         f"Chapter {chapter.number}: {chapter.title}\n\n"

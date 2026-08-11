@@ -104,9 +104,9 @@ def test_a_rejected_prompt_leaves_the_pipeline_immediately():
     )
 
 
-def test_an_unanswered_choice_stops_before_anything_is_generated():
-    """Picking one silently is the failure this branch exists to prevent."""
-    assert ("_named_several_skills", CLARIFY_ID) in cases_out_of(str(WorkflowStep.REQUIREMENT))
+def test_a_request_without_one_named_skill_stops_before_anything_is_generated():
+    """Picking a subject silently is the failure this branch exists to prevent."""
+    assert ("_needs_clarification", CLARIFY_ID) in cases_out_of(str(WorkflowStep.REQUIREMENT))
 
 
 def test_a_clear_request_is_the_default_route():

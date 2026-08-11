@@ -7,8 +7,10 @@ import pytest
 from backend.workflow import executors as executors_mod
 from backend.workflow.executors import (
     MARKDOWN_FILENAME,
+    MISSING_SKILL_MESSAGE,
     ClarifyExecutor,
     PublisherExecutor,
+    build_clarification,
     choice_message,
 )
 from backend.workflow.state import (
@@ -19,6 +21,7 @@ from backend.workflow.state import (
     Curriculum,
     ExperienceLevel,
     LearningRequest,
+    MissingRequirement,
     WorkflowStep,
 )
 
@@ -160,6 +163,17 @@ def test_two_options_read_as_a_pair_rather_than_a_list():
 
 def test_three_options_are_separated_before_the_last_one():
     assert choice_message(["a", "b", "c"]).startswith("You mentioned a, b and c,")
+
+
+def test_a_request_too_broad_to_build_on_is_asked_for_a_skill_not_for_a_choice():
+    """'Teach me Microsoft stuff' offers nothing to choose between, so listing options
+    would mean inventing them — the guess this node exists to refuse."""
+    clarification = build_clarification(
+        LearningRequest(is_learning_request=True, missing_requirements=[MissingRequirement.SKILL])
+    )
+
+    assert clarification.message == MISSING_SKILL_MESSAGE
+    assert clarification.options == []
 
 
 @pytest.mark.asyncio

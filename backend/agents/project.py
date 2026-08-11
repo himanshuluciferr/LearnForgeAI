@@ -133,7 +133,7 @@ def ambition_floor(request: LearningRequest) -> str:
     Left to a general instruction the first project comes back as a tutorial exercise
     regardless of who the learner is.
     """
-    if request.experience is ExperienceLevel.BEGINNER:
+    if request.assumed_level is ExperienceLevel.BEGINNER:
         return (
             "The learner is new to this skill, so the first project may start from nothing "
             "— but it must still do something real, not print a greeting."
@@ -163,7 +163,7 @@ def build_prompt(
 ) -> str:
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's goal: {request.goal}\n"
+        f"Learner's goal: {request.goal or 'not stated'}\n"
         f"Course language: {request.language}\n"
         f"Produce exactly {len(LEVELS)} projects.\n\n"
         f"{ambition_floor(request)}\n"

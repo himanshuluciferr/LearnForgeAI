@@ -113,10 +113,10 @@ def build_prompt(
     return (
         f"Course: {curriculum.title}\n"
         f"Skill: {request.skill}\n"
-        f"Learner's level: {request.experience}\n"
+        f"Learner's level: {request.assumed_level}\n"
         f"Goal: {request.goal or 'not stated'}\n"
         f"Course language: {request.language}\n"
-        f"Target length: about {target_words(request.daily_minutes)} words.\n\n"
+        f"Target length: about {target_words(request.minutes_per_day)} words.\n\n"
         f"Write chapter {outline.number} of {len(curriculum.chapters)}: {outline.title}\n\n"
         f"By the end the learner must be able to:\n{objectives}\n\n"
         f"{covered_so_far(curriculum, outline)}\n\n"

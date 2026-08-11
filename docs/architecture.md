@@ -177,8 +177,12 @@ construct `review` uses, with `skill-analysis` as the `Default`:
 
 - `is_learning_request: false` → `rejected`, a friendly "I couldn't tell what you'd like
   to learn".
-- more than one entry in `alternatives` → `clarify`, which names the options and asks the
-  learner to pick.
+- no single skill to build on → `clarify`, which asks for one. That is one signal,
+  `_needs_clarification`, covering three cases: `missing_requirements` is non-empty, the
+  learner offered several skills and chose none, or `skill` came back null.
+
+The question itself is assembled in code, not by a second model call — node 1 already
+reported what is missing, and another call would be another chance to change the subject.
 
 Both land at **5%**, after a single model call and before anything is generated. Asking
 costs one call; guessing costs a whole course on a subject nobody chose.
@@ -256,23 +260,37 @@ Output — [`LearningRequest`](../backend/workflow/state.py):
 | Field | Purpose |
 |---|---|
 | `is_learning_request` | The guardrail. Only required field |
-| `skill` | One skill, e.g. `"Azure AI Search"` |
-| `experience` | beginner / intermediate / advanced |
+| `skill` | One skill as the learner worded it, e.g. `"Azure AI Search"`. Null when they named none |
+| `experience` | beginner / intermediate / advanced / **unknown** |
+| `experience_evidence` | The words that raised `experience`. Null when unknown |
 | `goal` | What they want to be able to *do* |
-| `daily_minutes` | 5–480, drives course pacing |
+| `daily_minutes` | 5–480, drives course pacing. Null when unstated |
 | `language` | ISO 639-1 code — `"hi"`, not `"Hindi"` |
 | `alternatives` | Skills offered as a choice and never chosen between |
+| `missing_requirements` | `skill` or `skill_choice` — what must be asked for |
 
-Three design points that turned out to matter a lot:
+The contract: **node 1 captures the user's intent, it does not determine the truth about
+the subject.** Every field is an observation about the *message*. Working out what
+"Microsoft Agent Framework" actually is belongs to the next node, and it cannot do that if
+this one quietly substitutes a product the model has heard of.
+
+Design points that turned out to matter a lot:
 
 - **Only `is_learning_request` is required; everything else defaults.** The model is
   never forced to invent a skill for a prompt that has none. This is what stops
   "what's the weather" becoming a weather course.
+- **`missing_requirements` is the "I don't know" branch for the skill itself.** Without it,
+  a required `skill` turns *"Teach me Microsoft stuff"* into `"Azure"` — the same mechanism
+  that turned Microsoft Agent Framework into Bot Framework one node later. A broad vendor,
+  ecosystem or category is recognised as a learning request but never narrowed.
+- **`experience` has a fourth value, `unknown`, and evidence to go with it.** Defaulting a
+  silent message to `beginner` was a claim the learner never made. The beginner assumption
+  still exists, but as `LearningRequest.assumed_level`, in one place, where it is visible.
 - **Pydantic `Field(description=...)` is the real prompt.** The descriptions become the
   JSON schema the model sees. The `language='English'` bug was fixed purely by writing
   *"ISO 639-1 code… not the language name"* in a field description — no prompt text changed.
 - **`alternatives` exists because this is the only node that can see the choice.**
-  Downstream nodes read `skill: str`, a single string — so once this agent picks one of
+  Downstream nodes read a single skill — so once this agent picks one of
   *"React or maybe Vue"*, the fact that Vue was ever mentioned is gone for good. Measured
   live: *"React or maybe Vue"*, *"either Terraform or Bicep"* and *"python or java or go"*
   all populate it; *"React with TypeScript"* and *"Azure Functions and how to deploy them"*

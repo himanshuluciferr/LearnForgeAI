@@ -58,7 +58,7 @@ def build_chapter_prompt(request: LearningRequest, chapter: Chapter) -> str:
     takeaways = "\n".join(f"- {point}" for point in chapter.key_points) or "- none stated"
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's level: {request.experience}\n"
+        f"Learner's level: {request.assumed_level}\n"
         f"Learner's goal: {request.goal or 'not stated'}\n\n"
         f"Chapter {chapter.number}: {chapter.title}\n\n"
         f"The chapter claims these takeaways:\n{takeaways}\n\n"
@@ -82,7 +82,7 @@ def build_course_prompt(
 ) -> str:
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's level: {request.experience}\n"
+        f"Learner's level: {request.assumed_level}\n"
         f"Learner's goal: {request.goal or 'not stated'}\n\n"
         f"Course: {curriculum.title}\n"
         f"{curriculum.summary}\n\n"

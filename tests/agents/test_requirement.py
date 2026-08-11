@@ -10,6 +10,8 @@ from backend.workflow.state import (
     CourseState,
     ExperienceLevel,
     LearningRequest,
+    MissingRequirement,
+    StatedExperience,
     WorkflowStep,
 )
 from backend.workflow.workflow import _is_not_learning_request
@@ -29,10 +31,51 @@ def test_only_is_learning_request_is_required():
     """Every other field defaults, so an off-topic prompt needs no invented values."""
     request = LearningRequest(is_learning_request=False)
 
-    assert request.skill == ""
-    assert request.experience == ExperienceLevel.BEGINNER
-    assert request.daily_minutes == 30
+    assert request.skill is None
+    assert request.experience == StatedExperience.UNKNOWN
+    assert request.experience_evidence is None
+    assert request.goal is None
+    assert request.daily_minutes is None
     assert request.language == "en"
+    assert request.missing_requirements == []
+
+
+def test_an_unstated_level_is_recorded_as_unknown_and_taught_as_beginner():
+    """The message said nothing, so the schema says nothing — but a course still needs a level,
+    and every node reads the same fallback instead of inventing its own."""
+    request = LearningRequest(is_learning_request=True, skill="Rust")
+
+    assert request.experience is StatedExperience.UNKNOWN
+    assert request.assumed_level is ExperienceLevel.BEGINNER
+
+
+def test_a_stated_level_survives_the_fallback():
+    request = LearningRequest(
+        is_learning_request=True, skill="Rust", experience=StatedExperience.ADVANCED
+    )
+
+    assert request.assumed_level is ExperienceLevel.ADVANCED
+
+
+def test_an_unstated_time_commitment_still_yields_a_usable_number():
+    assert LearningRequest(is_learning_request=True, skill="Rust").minutes_per_day == 30
+    assert (
+        LearningRequest(is_learning_request=True, skill="Rust", daily_minutes=45).minutes_per_day
+        == 45
+    )
+
+
+def test_missing_requirements_are_a_closed_set():
+    """Routing keys off these values, so a free-form string would silently never match."""
+    assert list(MissingRequirement) == [
+        MissingRequirement.SKILL,
+        MissingRequirement.SKILL_CHOICE,
+    ]
+
+
+def test_an_unknown_missing_requirement_is_rejected():
+    with pytest.raises(ValidationError):
+        LearningRequest(is_learning_request=True, missing_requirements=["budget"])
 
 
 @pytest.mark.parametrize("minutes", [4, 481])

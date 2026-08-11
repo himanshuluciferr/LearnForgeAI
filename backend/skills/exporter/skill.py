@@ -188,7 +188,7 @@ def render_answer_key(practice: list[PracticeItem], quizzes: list[Quiz]) -> str:
 
 def header(state: CourseState) -> str:
     assert state.curriculum is not None and state.request is not None
-    facts = [f"**Skill:** {state.request.skill}", f"**Level:** {state.request.experience}"]
+    facts = [f"**Skill:** {state.request.skill}", f"**Level:** {state.request.assumed_level}"]
     if state.skill_analysis is not None:
         facts.append(f"**Estimated:** {state.skill_analysis.estimated_hours} hours")
     facts.append(f"**Chapters:** {len(state.chapters)}")

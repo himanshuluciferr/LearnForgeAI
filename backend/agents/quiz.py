@@ -122,7 +122,7 @@ def build_chapter_prompt(request: LearningRequest, chapter: Chapter) -> str:
     key_points = "\n".join(f"- {point}" for point in chapter.key_points) or "- none stated"
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's level: {request.experience}\n"
+        f"Learner's level: {request.assumed_level}\n"
         f"Course language: {request.language}\n"
         f"Write exactly {plan_question_count(chapter)} questions.\n\n"
         f"Chapter {chapter.number}: {chapter.title}\n\n"
@@ -143,7 +143,7 @@ def build_final_prompt(request: LearningRequest, chapters: list[Chapter]) -> str
     )
     return (
         f"Skill: {request.skill}\n"
-        f"Learner's level: {request.experience}\n"
+        f"Learner's level: {request.assumed_level}\n"
         f"Course language: {request.language}\n"
         f"Write exactly {plan_final_count(chapters)} questions.\n\n"
         "This is the final assessment for the whole course. Spread the questions across the "

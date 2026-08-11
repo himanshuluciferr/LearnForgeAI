@@ -54,7 +54,7 @@ def format_sources(sources: list[ResearchSource]) -> str:
 def starting_point(request: LearningRequest) -> str:
     """A general 'adapt to the level' rule gets ignored, so we decide the level here and
     hand the model one concrete instruction about where chapter 1 begins."""
-    if request.experience == ExperienceLevel.BEGINNER:
+    if request.assumed_level == ExperienceLevel.BEGINNER:
         return f"Chapter 1 may introduce {request.skill} from scratch."
     return (
         f"The learner already uses {request.skill}. Do not spend a chapter on what it is, "
@@ -67,18 +67,18 @@ def build_prompt(
     request: LearningRequest, analysis: SkillAnalysis, sources: list[ResearchSource]
 ) -> str:
     chapters = plan_chapter_count(analysis.estimated_hours)
-    study_days = round(analysis.estimated_hours * 60 / request.daily_minutes)
+    study_days = round(analysis.estimated_hours * 60 / request.minutes_per_day)
     prerequisites = ", ".join(analysis.prerequisites) or "none"
     return (
         f"Skill: {request.skill}\n"
         f"Field: {analysis.category}\n"
         f"Skill difficulty: {analysis.difficulty}\n"
-        f"Learner's current level: {request.experience}\n"
+        f"Learner's current level: {request.assumed_level}\n"
         f"Goal: {request.goal or 'not stated'}\n"
         f"Assumed knowledge, do not teach: {prerequisites}\n"
         f"Where to start: {starting_point(request)}\n"
         f"Course length: about {analysis.estimated_hours} hours, "
-        f"roughly {study_days} days at {request.daily_minutes} minutes a day\n"
+        f"roughly {study_days} days at {request.minutes_per_day} minutes a day\n"
         f"Course language: {request.language}\n"
         f"Produce exactly {chapters} chapters.\n\n"
         f"Verified sources:\n{format_sources(sources)}"

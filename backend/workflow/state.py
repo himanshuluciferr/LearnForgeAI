@@ -7,7 +7,7 @@ and fills in its own. Changing a model here changes the prompts downstream.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Sequence
+from typing import Annotated, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -64,22 +64,73 @@ class ExperienceLevel(StrEnum):
     ADVANCED = "advanced"
 
 
+class StatedExperience(StrEnum):
+    """What the learner's message revealed about their level.
+
+    Kept apart from `ExperienceLevel` because it has a fourth value: the message may say
+    nothing at all. Silently calling that 'beginner' is a claim the learner never made.
+    """
+
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+    UNKNOWN = "unknown"
+
+
+class MissingRequirement(StrEnum):
+    """What requirement-agent could not get from the message, and must ask for."""
+
+    SKILL = "skill"
+    SKILL_CHOICE = "skill_choice"
+
+
+# Used when the learner gave no time commitment. Node 1 records the absence; every
+# downstream node needs a number.
+DEFAULT_DAILY_MINUTES = 30
+
+
 class LearningRequest(BaseModel):
-    """Output of requirement-agent — the raw Teams prompt turned into structure."""
+    """Output of requirement-agent — the raw Teams prompt turned into structure.
+
+    This node captures the learner's intent. It does not decide anything about the subject
+    itself, so every field here is an observation about the MESSAGE, never about the skill.
+    """
 
     # Descriptions here become the JSON schema the model sees, so they steer extraction
     # more reliably than prompt text does.
     is_learning_request: bool = Field(
         description="False if the prompt is not a request to learn a skill. Other fields are then ignored."
     )
-    skill: str = Field(default="", description="One skill or technology to learn, e.g. 'Azure AI Search'.")
-    experience: ExperienceLevel = Field(
-        default=ExperienceLevel.BEGINNER,
-        description="The learner's current level with this skill. Assume beginner unless stated.",
+    skill: str | None = Field(
+        default=None,
+        description=(
+            "The one specific technology, framework, platform, language, tool or subject the "
+            "learner named, worded as they worded it. Null when they named none, named only a "
+            "vendor, ecosystem or broad category such as 'Microsoft stuff' or 'AI', or offered "
+            "a choice without making it. Never narrow a broad request into a specific product."
+        ),
     )
-    goal: str = Field(default="", description="What the learner wants to be able to do, in one sentence.")
-    daily_minutes: int = Field(
-        default=30, ge=5, le=480, description="Minutes per day the learner can commit."
+    experience: StatedExperience = Field(
+        default=StatedExperience.UNKNOWN,
+        description=(
+            "The learner's level with this skill. Use 'unknown' unless the message itself "
+            "signals it — this is what they said, not what you would guess."
+        ),
+    )
+    experience_evidence: str | None = Field(
+        default=None,
+        description=(
+            "The words in the message that put `experience` above 'unknown', quoted or closely "
+            "paraphrased. Null when experience is 'unknown'."
+        ),
+    )
+    goal: str | None = Field(
+        default=None,
+        description="What the learner wants to be able to do, in one sentence. Null if unstated.",
+    )
+    daily_minutes: Annotated[int, Field(ge=5, le=480)] | None = Field(
+        default=None,
+        description="Minutes per day the learner said they can commit. Null if unstated.",
     )
     language: str = Field(
         default="en", description="ISO 639-1 code for the course language, e.g. 'en', 'hi'. Not the language name."
@@ -88,11 +139,30 @@ class LearningRequest(BaseModel):
         default_factory=list,
         description=(
             "Every skill the learner offered as an alternative to the others without choosing, "
-            "as in 'React or Vue'. Include the one you put in `skill`. Leave this empty when "
-            "they named a single skill, or several that belong in one course such as "
-            "'React with TypeScript'."
+            "as in 'React or Vue'. Leave this empty when they named a single skill, or several "
+            "that belong in one course such as 'React with TypeScript'."
         ),
     )
+    missing_requirements: list[MissingRequirement] = Field(
+        default_factory=list,
+        description=(
+            "What must be asked for before a course can be built. 'skill' when no specific "
+            "subject was named or the subject is too broad to build a course on. "
+            "'skill_choice' when several were offered and none was chosen. Empty otherwise."
+        ),
+    )
+
+    @property
+    def assumed_level(self) -> ExperienceLevel:
+        """The level the course is written for. 'unknown' becomes beginner here, in one place,
+        rather than each downstream node inventing its own fallback."""
+        if self.experience is StatedExperience.UNKNOWN:
+            return ExperienceLevel.BEGINNER
+        return ExperienceLevel(self.experience.value)
+
+    @property
+    def minutes_per_day(self) -> int:
+        return self.daily_minutes or DEFAULT_DAILY_MINUTES
 
 
 class SkillAnalysis(BaseModel):

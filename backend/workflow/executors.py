@@ -9,6 +9,7 @@ from backend.skills.exporter.skill import render_course
 from backend.workflow.state import (
     Clarification,
     CourseState,
+    LearningRequest,
     PublishedCourse,
     Rejection,
     WorkflowStep,
@@ -32,8 +33,25 @@ def choice_message(options: list[str]) -> str:
     )
 
 
+MISSING_SKILL_MESSAGE = (
+    "Sure — what specific skill or technology would you like to learn? For example: Azure, "
+    "React, Python, Microsoft Agent Framework, or Azure AI Search."
+)
+
+
+def build_clarification(request: LearningRequest) -> Clarification:
+    """Node 1 already worked out what is missing, so the question is assembled in code.
+
+    A second model call to phrase it would be a second chance to change the subject.
+    """
+    options = request.alternatives
+    if len(options) > 1:
+        return Clarification(message=choice_message(options), options=options)
+    return Clarification(message=MISSING_SKILL_MESSAGE, options=[])
+
+
 class ClarifyExecutor(Executor):
-    """Terminal node for a learner who named several skills and chose none.
+    """Terminal node for a learner whose message does not name one skill to build on.
 
     It stops before the expensive half rather than picking for them, so the cost of asking
     is one model call instead of a whole course on the wrong subject.
@@ -44,8 +62,7 @@ class ClarifyExecutor(Executor):
         self, state: CourseState, ctx: WorkflowContext[CourseState, Clarification]
     ) -> None:
         assert state.request is not None
-        options = state.request.alternatives
-        await ctx.yield_output(Clarification(message=choice_message(options), options=options))
+        await ctx.yield_output(build_clarification(state.request))
 
 
 class RejectedExecutor(Executor):
