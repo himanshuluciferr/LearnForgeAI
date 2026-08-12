@@ -279,6 +279,7 @@ async def test_the_executor_marks_the_step_and_forwards_state(monkeypatch):
 def test_progress_reaches_eighty_six_percent_once_projects_are_designed():
     done = [
         WorkflowStep.REQUIREMENT,
+        WorkflowStep.SUBJECT_ANALYSIS,
         WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,

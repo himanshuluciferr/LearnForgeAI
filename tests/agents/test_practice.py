@@ -282,6 +282,7 @@ async def test_executor_stores_the_practice_and_forwards_state(monkeypatch):
 def test_progress_reaches_sixty_eight_percent_once_practice_is_set():
     completed = [
         WorkflowStep.REQUIREMENT,
+        WorkflowStep.SUBJECT_ANALYSIS,
         WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,

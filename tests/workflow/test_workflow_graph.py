@@ -8,9 +8,14 @@ from __future__ import annotations
 
 from agent_framework import SwitchCaseEdgeGroup
 
-from backend.workflow.executors import CLARIFY_ID, REJECTED_ID
+from backend.workflow.executors import (
+    CLARIFY_ID,
+    CONFIRM_SUBJECT_ID,
+    REJECTED_ID,
+    SUBJECT_CLARIFY_ID,
+)
 from backend.workflow.state import WorkflowStep
-from backend.workflow.workflow import build_workflow
+from backend.workflow.workflow import build_confirmed_workflow, build_workflow
 
 
 def edges() -> set[tuple[str, str, str | None]]:
@@ -113,15 +118,58 @@ def test_a_clear_request_is_the_default_route():
     """Default rather than a third condition, so no prompt can fall through to no branch."""
     assert cases_out_of(str(WorkflowStep.REQUIREMENT))[-1] == (
         None,
+        str(WorkflowStep.SUBJECT_ANALYSIS),
+    )
+
+
+def test_a_subject_we_could_not_establish_never_reaches_the_course():
+    """The invariant as wiring: an unrecognised or ambiguous subject has no path onwards."""
+    assert cases_out_of(str(WorkflowStep.SUBJECT_ANALYSIS))[0] == (
+        "_subject_not_identified",
+        SUBJECT_CLARIFY_ID,
+    )
+
+
+def test_an_identified_subject_is_shown_to_the_learner_before_it_is_built():
+    """Ranking skew is invisible to every automated check, so the person paying for the
+    course sees the subject and its sources first."""
+    assert ("_needs_confirmation", CONFIRM_SUBJECT_ID) in cases_out_of(
+        str(WorkflowStep.SUBJECT_ANALYSIS)
+    )
+
+
+def test_an_approved_subject_falls_through_to_the_course():
+    assert cases_out_of(str(WorkflowStep.SUBJECT_ANALYSIS))[-1] == (
+        None,
         str(WorkflowStep.SKILL_ANALYSIS),
     )
 
 
+def test_the_second_run_starts_after_the_subject_was_settled():
+    """Confirmation cannot suspend a workflow that lives in memory, so the approved run is a
+    fresh one that replays the analysis rather than paying for it again."""
+    started = build_confirmed_workflow().start_executor_id
+
+    assert str(started) == str(WorkflowStep.SKILL_ANALYSIS)
+
+
+def test_the_second_run_cannot_re_ask_the_learner():
+    """It begins past every early exit, so an approved course can only end as a course."""
+    reachable = {
+        str(target)
+        for group in build_confirmed_workflow().edge_groups
+        for edge in group.edges
+        for target in (edge.target_id,)
+    }
+
+    assert not reachable & {REJECTED_ID, CLARIFY_ID, SUBJECT_CLARIFY_ID, CONFIRM_SUBJECT_ID}
+
+
 def test_neither_early_exit_can_reach_the_rest_of_the_pipeline():
-    """Both are terminal: a course must never be built after we said we could not build one."""
-    assert not [
-        (source, target) for source, target, _ in edges() if source in {REJECTED_ID, CLARIFY_ID}
-    ]
+    """All terminal: a course must never be built after we said we could not build one."""
+    exits = {REJECTED_ID, CLARIFY_ID, SUBJECT_CLARIFY_ID, CONFIRM_SUBJECT_ID}
+
+    assert not [(source, target) for source, target, _ in edges() if source in exits]
 
 
 def test_review_can_send_the_course_back_to_be_rewritten():

@@ -18,6 +18,7 @@ from backend.agents import requirement as requirement_mod
 from backend.agents import research as research_mod
 from backend.agents import review as review_mod
 from backend.agents import skill_analysis as skill_mod
+from backend.agents import subject_analysis as subject_mod
 from backend.workflow import executors as executors_mod
 from backend.workflow.state import (
     MAX_REVISIONS,
@@ -26,9 +27,13 @@ from backend.workflow.state import (
     CourseState,
     Curriculum,
     ExperienceLevel,
+    IdentityStatus,
     LearningRequest,
     ReviewResult,
     SkillAnalysis,
+    SubjectAnalysis,
+    SubjectTrace,
+    TechnicalSubjectType,
     WorkflowStep,
 )
 from backend.workflow.workflow import build_workflow
@@ -48,6 +53,11 @@ REQUEST = LearningRequest(
 )
 ANALYSIS = SkillAnalysis(
     category="Cloud", difficulty=ExperienceLevel.BEGINNER, estimated_hours=10
+)
+SUBJECT = SubjectAnalysis(
+    identity_status=IdentityStatus.CONFIRMED,
+    canonical_name="s",
+    subject_type=TechnicalSubjectType.PLATFORM,
 )
 
 
@@ -73,6 +83,9 @@ class RecordingStore:
 def stub_agents(monkeypatch):
     """Every model call replaced, so a whole course runs in milliseconds."""
     monkeypatch.setattr(requirement_mod, "extract_requirement", returning(REQUEST))
+    # Node 2 searches and fetches for real, so an unstubbed graph run reaches the network and
+    # the offline suite silently starts making live calls.
+    monkeypatch.setattr(subject_mod, "investigate", returning((SUBJECT, [], SubjectTrace())))
     monkeypatch.setattr(skill_mod, "analyse_skill", returning(ANALYSIS))
     monkeypatch.setattr(research_mod, "gather_sources", returning([]))
     monkeypatch.setattr(curriculum_mod, "plan_curriculum", returning(CURRICULUM))
@@ -101,7 +114,9 @@ def failing_reviews(count: int):
 
 async def run_graph(monkeypatch, rejections: int) -> tuple[CourseState, list[str]]:
     monkeypatch.setattr(review_mod, "review_course", failing_reviews(rejections))
-    state = CourseState(job_id="j", user_id="u", prompt="teach me x")
+    # The learner has already approved the subject, which is the only path that reaches the
+    # expensive half of the graph.
+    state = CourseState(job_id="j", user_id="u", prompt="teach me x", subject_confirmed=True)
     visited: list[str] = []
 
     async for event in build_workflow().run(state, stream=True):

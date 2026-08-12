@@ -21,12 +21,17 @@ from backend.agents.requirement import RequirementExecutor
 from backend.agents.research import ResearchExecutor
 from backend.agents.review import ReviewExecutor
 from backend.agents.skill_analysis import SkillAnalysisExecutor
+from backend.agents.subject_analysis import SubjectAnalysisExecutor, is_identified
 from backend.workflow.executors import (
     CLARIFY_ID,
+    CONFIRM_SUBJECT_ID,
     REJECTED_ID,
+    SUBJECT_CLARIFY_ID,
     ClarifyExecutor,
+    ConfirmSubjectExecutor,
     PublisherExecutor,
     RejectedExecutor,
+    SubjectClarifyExecutor,
 )
 from backend.workflow.state import CourseState, WorkflowStep
 
@@ -48,53 +53,98 @@ def _needs_clarification(state: CourseState) -> bool:
     return bool(request.missing_requirements) or len(request.alternatives) > 1 or not request.skill
 
 
+def _subject_not_identified(state: CourseState) -> bool:
+    """The invariant, as an edge: nothing downstream runs on a subject we could not establish."""
+    return state.subject is not None and not is_identified(state)
+
+
+def _needs_confirmation(state: CourseState) -> bool:
+    return is_identified(state) and not state.subject_confirmed
+
+
 def _needs_revision(state: CourseState) -> bool:
     return state.should_regenerate
 
 
-def build_workflow() -> Workflow:
-    # Executor ids are WorkflowStep values so progress events map straight to steps.
-    requirement = RequirementExecutor(id=WorkflowStep.REQUIREMENT)
-    skill_analysis = SkillAnalysisExecutor(id=WorkflowStep.SKILL_ANALYSIS)
-    research = ResearchExecutor(id=WorkflowStep.RESEARCH)
-    curriculum = CurriculumExecutor(id=WorkflowStep.CURRICULUM)
-    chapter = ChapterExecutor(id=WorkflowStep.CHAPTER)
-    practice = PracticeExecutor(id=WorkflowStep.PRACTICE)
-    project = ProjectExecutor(id=WorkflowStep.PROJECT)
-    quiz = QuizExecutor(id=WorkflowStep.QUIZ)
-    review = ReviewExecutor(id=WorkflowStep.REVIEW)
-    publisher = PublisherExecutor(id=WorkflowStep.PUBLISHER)
-    rejected = RejectedExecutor(id=REJECTED_ID)
-    clarify = ClarifyExecutor(id=CLARIFY_ID)
+def _course_nodes() -> dict[str, object]:
+    """Every executor, built once so both entry points wire the identical tail."""
+    return {
+        "requirement": RequirementExecutor(id=WorkflowStep.REQUIREMENT),
+        "subject": SubjectAnalysisExecutor(id=WorkflowStep.SUBJECT_ANALYSIS),
+        "skill_analysis": SkillAnalysisExecutor(id=WorkflowStep.SKILL_ANALYSIS),
+        "research": ResearchExecutor(id=WorkflowStep.RESEARCH),
+        "curriculum": CurriculumExecutor(id=WorkflowStep.CURRICULUM),
+        "chapter": ChapterExecutor(id=WorkflowStep.CHAPTER),
+        "review": ReviewExecutor(id=WorkflowStep.REVIEW),
+        "practice": PracticeExecutor(id=WorkflowStep.PRACTICE),
+        "project": ProjectExecutor(id=WorkflowStep.PROJECT),
+        "quiz": QuizExecutor(id=WorkflowStep.QUIZ),
+        "publisher": PublisherExecutor(id=WorkflowStep.PUBLISHER),
+    }
+
+
+def _add_course_tail(builder: WorkflowBuilder, nodes: dict) -> WorkflowBuilder:
     return (
-        WorkflowBuilder(start_executor=requirement)
-        # Switch-case rather than three sibling conditions: it evaluates once and returns one
-        # target, so the branches cannot overlap or leave a message with nowhere to go.
-        .add_switch_case_edge_group(
-            requirement,
-            [
-                Case(condition=_is_not_learning_request, target=rejected),
-                Case(condition=_needs_clarification, target=clarify),
-                Default(target=skill_analysis),
-            ],
-        )
-        .add_edge(skill_analysis, research)
-        .add_edge(research, curriculum)
-        .add_edge(curriculum, chapter)
-        .add_edge(chapter, review)
+        builder.add_edge(nodes["skill_analysis"], nodes["research"])
+        .add_edge(nodes["research"], nodes["curriculum"])
+        .add_edge(nodes["curriculum"], nodes["chapter"])
+        .add_edge(nodes["chapter"], nodes["review"])
         # Switch-case, not two conditional edges: it picks one target per message in a single
         # pass. Sibling conditions are evaluated one at a time, and the rewrite mutates the
         # very state they read, so two "opposite" conditions can both fire and duplicate the
         # whole tail of the course.
         .add_switch_case_edge_group(
-            review,
+            nodes["review"],
             [
-                Case(condition=_needs_revision, target=chapter),
-                Default(target=practice),
+                Case(condition=_needs_revision, target=nodes["chapter"]),
+                Default(target=nodes["practice"]),
             ],
         )
-        .add_edge(practice, project)
-        .add_edge(project, quiz)
-        .add_edge(quiz, publisher)
-        .build()
+        .add_edge(nodes["practice"], nodes["project"])
+        .add_edge(nodes["project"], nodes["quiz"])
+        .add_edge(nodes["quiz"], nodes["publisher"])
     )
+
+
+def build_workflow() -> Workflow:
+    """The first run: parse the request, establish the subject, then stop for confirmation."""
+    nodes = _course_nodes()
+    rejected = RejectedExecutor(id=REJECTED_ID)
+    clarify = ClarifyExecutor(id=CLARIFY_ID)
+    subject_clarify = SubjectClarifyExecutor(id=SUBJECT_CLARIFY_ID)
+    confirm = ConfirmSubjectExecutor(id=CONFIRM_SUBJECT_ID)
+    builder = (
+        WorkflowBuilder(start_executor=nodes["requirement"])
+        # Switch-case rather than three sibling conditions: it evaluates once and returns one
+        # target, so the branches cannot overlap or leave a message with nowhere to go.
+        .add_switch_case_edge_group(
+            nodes["requirement"],
+            [
+                Case(condition=_is_not_learning_request, target=rejected),
+                Case(condition=_needs_clarification, target=clarify),
+                Default(target=nodes["subject"]),
+            ],
+        )
+        .add_switch_case_edge_group(
+            nodes["subject"],
+            [
+                Case(condition=_subject_not_identified, target=subject_clarify),
+                Case(condition=_needs_confirmation, target=confirm),
+                Default(target=nodes["skill_analysis"]),
+            ],
+        )
+    )
+    return _add_course_tail(builder, nodes).build()
+
+
+def build_confirmed_workflow() -> Workflow:
+    """The second run, after the learner approved the subject.
+
+    A separate entry point rather than a resumed one: a suspended MAF workflow lives in memory
+    and our jobs run in background tasks with no checkpoint storage, so it would not survive
+    the wait. The analysis and its sources are replayed from the job instead, which also means
+    the search and the two model calls are not paid for twice.
+    """
+    nodes = _course_nodes()
+    builder = WorkflowBuilder(start_executor=nodes["skill_analysis"])
+    return _add_course_tail(builder, nodes).build()

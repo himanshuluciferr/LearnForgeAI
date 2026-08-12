@@ -23,6 +23,7 @@ MAX_REVISIONS = 2
 
 class WorkflowStep(StrEnum):
     REQUIREMENT = "requirement"
+    SUBJECT_ANALYSIS = "subject-analysis"
     SKILL_ANALYSIS = "skill-analysis"
     RESEARCH = "research"
     CURRICULUM = "curriculum"
@@ -41,8 +42,10 @@ STEP_ORDER: tuple[WorkflowStep, ...] = tuple(WorkflowStep)
 # Rough share of total runtime, used to report progress. Must sum to 100.
 STEP_WEIGHTS: dict[WorkflowStep, int] = {
     WorkflowStep.REQUIREMENT: 5,
-    WorkflowStep.SKILL_ANALYSIS: 5,
-    WorkflowStep.RESEARCH: 10,
+    # Real retrieval: one search, a page fetch each for two or three sources, two model calls.
+    WorkflowStep.SUBJECT_ANALYSIS: 5,
+    WorkflowStep.SKILL_ANALYSIS: 2,
+    WorkflowStep.RESEARCH: 8,
     WorkflowStep.CURRICULUM: 10,
     WorkflowStep.CHAPTER: 30,
     # One call per chapter plus a whole-syllabus pass, so it costs more than the 5 it started with.
@@ -163,6 +166,186 @@ class LearningRequest(BaseModel):
     @property
     def minutes_per_day(self) -> int:
         return self.daily_minutes or DEFAULT_DAILY_MINUTES
+
+
+class SourceDocument(BaseModel):
+    """A page we fetched and read. The first thing in this pipeline that keeps the retrieved
+    words rather than a link to them."""
+
+    title: str
+    url: str
+    text: str
+
+    @property
+    def words(self) -> int:
+        return len(self.text.split())
+
+
+class IdentityStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    AMBIGUOUS = "ambiguous"
+    # We read pages and none of them describes the requested name.
+    UNRECOGNISED = "unrecognised"
+    # We could not read enough to judge at all. Kept apart from UNRECOGNISED because
+    # "retrieval broke" and "this does not exist" are different facts that a single empty
+    # list would otherwise collapse into one verdict.
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class SourceKind(StrEnum):
+    """How authoritative a document is for establishing identity.
+
+    Recorded, not yet gated: a rule such as "confirmed needs one first-party source" is a
+    threshold, and thresholds set without measurement are how the review bar ended up inside
+    its own noise band. This field is what makes that rule measurable later.
+    """
+
+    FIRST_PARTY_DOCUMENTATION = "first_party_documentation"
+    OFFICIAL_REPOSITORY = "official_repository"
+    SPECIFICATION = "specification"
+    REPUTABLE_SECONDARY = "reputable_secondary"
+    OTHER = "other"
+
+
+class TechnicalSubjectType(StrEnum):
+    PROGRAMMING_LANGUAGE = "programming_language"
+    SOFTWARE_FRAMEWORK = "software_framework"
+    SOFTWARE_LIBRARY = "software_library"
+    PLATFORM = "platform"
+    SERVICE = "service"
+    TOOL = "tool"
+    PROTOCOL_OR_SPECIFICATION = "protocol_or_specification"
+    CONCEPT_OR_PRACTICE = "concept_or_practice"
+    PRODUCT_FEATURE = "product_feature"
+    # A closed set with no escape hatch is a demand for the nearest neighbour.
+    OTHER = "other"
+
+
+class TargetedSearch(BaseModel):
+    query: str = Field(description="The search to run.")
+    domains: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Restrict to these hostnames, e.g. ['learn.microsoft.com'] or ['rust-lang.org']. "
+            "Leave empty for a general search."
+        ),
+    )
+    reason: str = Field(
+        description=(
+            "Why this search is needed — what these results are missing. About the search, "
+            "never about what the subject is."
+        )
+    )
+
+
+class SearchPlan(BaseModel):
+    """Retrieval strategy only, as data rather than as tool calls, so the plan and the actions
+    we take cannot diverge and every action stays ours to record.
+
+    Deliberately says nothing about what the subject IS. That judgement belongs to the analysis
+    step, which reads whole pages; this step sees only search snippets, and snippets are strong
+    enough to find a subject but far too weak to identify one.
+    """
+
+    fetch: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Numbers of the results worth reading in full, strongest evidence first. Prefer "
+            "first-party documentation and the project's own repository. Two or three is "
+            "usually enough; never pick a result just to fill the list."
+        ),
+    )
+    targeted_searches: list[TargetedSearch] = Field(
+        default_factory=list,
+        description=(
+            "Only when these results leave the identity unsettled. Leave empty when what is "
+            "here already answers it."
+        ),
+    )
+
+
+class SubjectEvidence(BaseModel):
+    document_index: int = Field(
+        description="The number of the document that supports this, as printed. Never a URL."
+    )
+    source_kind: SourceKind = Field(
+        description="How authoritative that document is for saying what this subject is."
+    )
+    supporting_claim: str = Field(
+        description="What that document actually says which establishes what this subject is."
+    )
+
+
+class SubjectAnalysis(BaseModel):
+    """Output of subject-analysis-agent — what the retrieved documents say the subject is.
+
+    Every field is a claim about the documents, never about the world. `confidence`,
+    `difficulty` and `estimated_hours` were specified, built and then measured out: across 13
+    subjects x 3 runs, confidence overlapped between correct and incorrect identifications
+    (correct fell to 0.80, wrong reached 0.95), difficulty returned `intermediate` for 10 of 13,
+    and estimated_hours swung 40/120/40 on one subject.
+    """
+
+    identity_status: IdentityStatus = Field(
+        description=(
+            "confirmed when the documents describe the subject that was asked for; ambiguous "
+            "when they describe several unrelated technical subjects sharing that name; "
+            "unrecognised when none of them describes it; insufficient_evidence when what you "
+            "were given is too thin to judge either way."
+        )
+    )
+    canonical_name: str | None = Field(
+        default=None,
+        description=(
+            "The name the documents themselves use for this subject, including a current name "
+            "that has replaced an older one. Null unless a document states it."
+        ),
+    )
+    subject_type: TechnicalSubjectType = Field(
+        description="What kind of technical thing it is, per the documents."
+    )
+    description: str = Field(
+        default="",
+        description="One or two sentences on what it is, drawn from the documents.",
+    )
+    scope: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The main areas this subject covers, named as the documents name them. Short noun "
+            "phrases such as 'workflows' or 'middleware', not sentences."
+        ),
+    )
+    prerequisites: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What genuinely blocks starting. Never installation or setup steps, general "
+            "computer literacy, or ordinary tools such as a text editor or a browser."
+        ),
+    )
+    candidates: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Only when ambiguous: the distinct technical subjects the documents describe under "
+            "this name. Do not choose between them."
+        ),
+    )
+    evidence: list[SubjectEvidence] = Field(
+        default_factory=list, description="Which documents established the identity, and how."
+    )
+
+
+class SubjectTrace(BaseModel):
+    """What code actually did, as opposed to what the model planned.
+
+    A model that searches and judges in one turn cannot be audited: an agent asked to do both
+    reported that Rust does not exist on one run in three, with no sources, which is
+    indistinguishable from never having searched. Counting the work ourselves is what makes a
+    refusal mean something.
+    """
+
+    searches: list[str] = Field(default_factory=list)
+    fetched_urls: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class SkillAnalysis(BaseModel):
@@ -575,6 +758,21 @@ class Clarification(BaseModel):
     options: list[str]
 
 
+class SubjectConfirmation(BaseModel):
+    """Terminal result when the subject is identified but the learner has not seen it yet.
+
+    Ranking skew is invisible to every check we can run: a search for a name one vendor
+    dominates returns documents that genuinely all describe one subject, so the identity comes
+    back `confirmed` and the invariant passes. Showing the learner the name and the pages it
+    was read from costs one round trip; being wrong costs the whole expensive half of the run.
+    """
+
+    message: str
+    canonical_name: str
+    description: str
+    source_urls: list[str]
+
+
 class CourseState(BaseModel):
     """Passed between executors for the lifetime of one generation job."""
 
@@ -583,6 +781,13 @@ class CourseState(BaseModel):
     prompt: str
 
     request: LearningRequest | None = None
+    subject: SubjectAnalysis | None = None
+    # The retrieved page text itself, so later nodes read evidence instead of re-fetching links.
+    sources: list[SourceDocument] = Field(default_factory=list)
+    subject_trace: SubjectTrace = Field(default_factory=SubjectTrace)
+    # Set when the learner has already approved this subject, which is what lets a second run
+    # skip straight past the nodes that produced it.
+    subject_confirmed: bool = False
     skill_analysis: SkillAnalysis | None = None
     research: list[ResearchSource] = Field(default_factory=list)
     curriculum: Curriculum | None = None

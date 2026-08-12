@@ -22,6 +22,8 @@ class JobStatus(StrEnum):
     REJECTED = "rejected"
     # The learner named several skills and chose none. Answerable by asking again.
     NEEDS_CHOICE = "needs-choice"
+    # The subject is identified and the learner has been shown it. Waiting on their yes.
+    NEEDS_CONFIRMATION = "needs-confirmation"
 
 
 def _now() -> datetime:
@@ -38,6 +40,11 @@ class GenerationJob(BaseModel):
     detail: str | None = None
     # Kept as data rather than only inside `detail`, so a card can offer them as buttons.
     options: list[str] = Field(default_factory=list)
+    # What the confirmation card shows. Same reason as `options`: re-parsing a sentence to
+    # rebuild a card is a second bug.
+    subject_name: str | None = None
+    subject_description: str | None = None
+    subject_sources: list[str] = Field(default_factory=list)
     error: str | None = None
     course_id: str | None = None
     created_at: datetime = Field(default_factory=_now)

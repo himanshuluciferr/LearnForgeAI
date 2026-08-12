@@ -437,6 +437,7 @@ async def test_a_passing_review_does_not_make_the_executor_rewrite(monkeypatch):
 def test_progress_reaches_sixty_percent_once_chapters_are_written():
     completed = [
         WorkflowStep.REQUIREMENT,
+        WorkflowStep.SUBJECT_ANALYSIS,
         WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,

@@ -161,6 +161,11 @@ async def test_finding_nothing_still_completes_the_step(monkeypatch):
 
 
 def test_three_nodes_report_twenty_percent():
-    completed = [WorkflowStep.REQUIREMENT, WorkflowStep.SKILL_ANALYSIS, WorkflowStep.RESEARCH]
+    completed = [
+        WorkflowStep.REQUIREMENT,
+        WorkflowStep.SUBJECT_ANALYSIS,
+        WorkflowStep.SKILL_ANALYSIS,
+        WorkflowStep.RESEARCH,
+    ]
 
     assert progress_percent(completed) == 20

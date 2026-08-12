@@ -10,7 +10,13 @@ from backend.schemas.course import CourseRequest
 from backend.services.course_store import FileCourseStore
 from backend.services.job_store import job_store
 from backend.workflow import runner as runner_module
-from backend.workflow.state import STEP_WEIGHTS, Clarification, Rejection
+from backend.workflow.state import (
+    STEP_WEIGHTS,
+    Clarification,
+    CourseState,
+    Rejection,
+    SubjectConfirmation,
+)
 
 client = TestClient(app)
 
@@ -19,7 +25,7 @@ client = TestClient(app)
 def no_live_workflow(monkeypatch):
     """Endpoint tests must not reach the model; the runner is covered separately below."""
 
-    async def noop(job_id: str, request: CourseRequest) -> None:
+    async def noop(job_id: str, request: CourseRequest, state=None) -> None:
         return None
 
     monkeypatch.setattr(course_api, "run_generation", noop)
@@ -136,6 +142,86 @@ async def test_the_options_reach_the_caller_as_a_list(monkeypatch):
     progress = client.get("/courses/job-opts/progress?user_id=u1").json()
     assert progress["options"] == ["React", "Vue"]
     assert progress["detail"] == "React or Vue?"
+
+
+# --- the confirmation gate ---
+
+
+CONFIRMATION = SubjectConfirmation(
+    message="I'll build a course on Microsoft Agent Framework. Shall I start?",
+    canonical_name="Microsoft Agent Framework",
+    description="A framework for AI agents and multi-agent workflows.",
+    source_urls=["https://learn.microsoft.com/agent-framework/"],
+)
+
+
+async def stop_at_confirmation(job_id: str, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(runner_module, "build_workflow", yielding(CONFIRMATION))
+    monkeypatch.setattr(runner_module, "course_store", FileCourseStore(tmp_path))
+    monkeypatch.setattr(course_api, "course_store", FileCourseStore(tmp_path))
+    await job_store.create(GenerationJob(id=job_id, user_id="u1", prompt="teach me MAF"))
+    await runner_module.run_generation(
+        job_id, CourseRequest(user_id="u1", prompt="teach me MAF")
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_identified_subject_waits_for_the_learner(monkeypatch, tmp_path):
+    """Stopping here costs one round trip; being wrong costs the whole expensive half."""
+    job_id = str(uuid4())
+
+    await stop_at_confirmation(job_id, monkeypatch, tmp_path)
+
+    job = await job_store.get(job_id)
+    assert job.status == JobStatus.NEEDS_CONFIRMATION
+    assert job.error is None and job.course_id is None
+
+
+@pytest.mark.asyncio
+async def test_the_card_gets_the_name_and_the_sources_as_data(monkeypatch, tmp_path):
+    job_id = str(uuid4())
+
+    await stop_at_confirmation(job_id, monkeypatch, tmp_path)
+
+    progress = client.get(f"/courses/{job_id}/progress?user_id=u1").json()
+    assert progress["subject_name"] == "Microsoft Agent Framework"
+    assert progress["subject_sources"] == ["https://learn.microsoft.com/agent-framework/"]
+
+
+@pytest.mark.asyncio
+async def test_confirming_starts_the_run_from_the_subject_the_learner_approved(
+    monkeypatch, tmp_path
+):
+    """A suspended workflow would not survive the wait, so the approved run is a fresh one
+    that replays the stored analysis rather than searching again."""
+    job_id = str(uuid4())
+    await stop_at_confirmation(job_id, monkeypatch, tmp_path)
+    resumed: list[CourseState] = []
+
+    async def capture(job: str, request: CourseRequest, state=None) -> None:
+        resumed.append(state)
+
+    monkeypatch.setattr(course_api, "run_generation", capture)
+
+    response = client.post(f"/courses/{job_id}/confirm?user_id=u1")
+
+    assert response.status_code == 202
+    assert len(resumed) == 1 and resumed[0].subject_confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_was_never_asked_cannot_be_confirmed(monkeypatch, tmp_path):
+    monkeypatch.setattr(course_api, "course_store", FileCourseStore(tmp_path))
+    job_id = str(uuid4())
+    await job_store.create(
+        GenerationJob(id=job_id, user_id="u1", prompt="p", status=JobStatus.RUNNING)
+    )
+
+    assert client.post(f"/courses/{job_id}/confirm?user_id=u1").status_code == 409
+
+
+def test_confirming_an_unknown_job_is_a_404():
+    assert client.post(f"/courses/{uuid4()}/confirm?user_id=u1").status_code == 404
 
 
 @pytest.mark.asyncio

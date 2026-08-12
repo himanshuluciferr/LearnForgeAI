@@ -231,6 +231,7 @@ async def test_planning_still_runs_when_research_found_nothing(monkeypatch):
 def test_four_nodes_report_thirty_percent():
     completed = [
         WorkflowStep.REQUIREMENT,
+        WorkflowStep.SUBJECT_ANALYSIS,
         WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,

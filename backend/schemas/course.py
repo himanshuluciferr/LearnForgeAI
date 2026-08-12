@@ -29,6 +29,10 @@ class JobProgress(BaseModel):
     percent: int = 0
     detail: str | None = None
     options: list[str] = Field(default_factory=list)
+    # Populated while the job waits on NEEDS_CONFIRMATION, so the card needs no second lookup.
+    subject_name: str | None = None
+    subject_description: str | None = None
+    subject_sources: list[str] = Field(default_factory=list)
     error: str | None = None
     # Set once the course is saved; this is how a poller finds the result.
     course_id: str | None = None

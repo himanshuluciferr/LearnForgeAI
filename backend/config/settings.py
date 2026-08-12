@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     foundry_project_endpoint: str = ""
     foundry_model_deployment_name: str = "gpt-5-mini"
 
+    # Unauthenticated GitHub search allows ~10 requests a minute and we have hit that ceiling.
+    github_token: str = ""
+
     # Empty endpoint means local development, which keeps the in-memory and file stores.
     cosmos_endpoint: str = ""
     cosmos_database: str = "learnforge"
