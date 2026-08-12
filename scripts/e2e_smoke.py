@@ -4,6 +4,8 @@ Start the app first (`python -m uvicorn backend.main:app`), then run this. It ex
 one thing no test can: the app configured by the real .env, which picks BlobArtifactStore
 and Cosmos, while every pytest run forces the local stores. Takes several minutes because
 it generates a real course.
+
+It also answers the subject confirmation itself, since a real run now stops to ask.
 """
 
 import asyncio
@@ -17,6 +19,43 @@ sys.stdout.reconfigure(encoding="utf-8")
 BASE = "http://127.0.0.1:8000"
 USER = "e2e-publisher-user"
 
+# Statuses the run will not leave on its own. `needs-choice` is one of them: the learner named
+# several skills, or none, and is expected to ask again rather than be waited for.
+TERMINAL = ("completed", "failed", "rejected", "needs-choice")
+
+
+async def watch(api: httpx.AsyncClient, job_id: str) -> dict:
+    """Polls to a terminal state, answering the confirmation gate on the way.
+
+    Node 2 stops the run to show the learner which subject it identified, so a loop that only
+    waited for completed/failed/rejected would poll forever.
+    """
+    started = time.monotonic()
+    last = None
+    confirmed = False
+    while True:
+        progress = (await api.get(f"/courses/{job_id}/progress", params={"user_id": USER})).json()
+        marker = (progress["step"], progress["percent"], progress["status"])
+        if marker != last:
+            last = marker
+            print(f"  [{progress['step']}] {progress['percent']}% {progress['status']}", flush=True)
+
+        if progress["status"] == "needs-confirmation" and not confirmed:
+            print(f"  subject: {progress['subject_name']}", flush=True)
+            print(f"    {(progress['subject_description'] or '')[:140]}", flush=True)
+            for url in progress["subject_sources"]:
+                print(f"    read {url}", flush=True)
+            # The one thing a human would do here, so the rest of the run can be exercised.
+            answered = await api.post(f"/courses/{job_id}/confirm", params={"user_id": USER})
+            answered.raise_for_status()
+            confirmed = True
+            print("  confirmed, generating", flush=True)
+        elif progress["status"] in TERMINAL:
+            print(f"\nstatus={progress['status']} after {time.monotonic() - started:.0f}s", flush=True)
+            return progress
+
+        await asyncio.sleep(5)
+
 
 async def main():
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as api:
@@ -28,20 +67,11 @@ async def main():
         job_id = accepted.json()["job_id"]
         print(f"job {job_id}", flush=True)
 
-        started = time.monotonic()
-        last = None
-        while True:
-            progress = (await api.get(f"/courses/{job_id}/progress", params={"user_id": USER})).json()
-            if (progress["step"], progress["percent"]) != last:
-                last = (progress["step"], progress["percent"])
-                print(f"  [{progress['step']}] {progress['percent']}%", flush=True)
-            if progress["status"] in ("completed", "failed", "rejected"):
-                break
-            await asyncio.sleep(5)
-
-        print(f"\nstatus={progress['status']} after {time.monotonic() - started:.0f}s", flush=True)
-        if progress.get("error"):
-            print("error:", progress["error"], flush=True)
+        progress = await watch(api, job_id)
+        if progress["status"] != "completed":
+            print("detail:", progress.get("detail"), flush=True)
+            if progress.get("error"):
+                print("error:", progress["error"], flush=True)
             return
 
         course = (
@@ -50,6 +80,12 @@ async def main():
 
     state = course["state"]
     published = state["published"]
+    subject = state["subject"]
+    print(
+        f"subject={subject['canonical_name']} ({subject['subject_type']}) "
+        f"sources={len(state['sources'])} searches={len(state['subject_trace']['searches'])}",
+        flush=True,
+    )
     print(
         f"chapters={len(state['chapters'])} practice={len(state['practice'])} "
         f"projects={len(state['projects'])} quizzes={len(state['quizzes'])} "
