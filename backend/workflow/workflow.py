@@ -20,7 +20,6 @@ from backend.agents.quiz import QuizExecutor
 from backend.agents.requirement import RequirementExecutor
 from backend.agents.research import ResearchExecutor
 from backend.agents.review import ReviewExecutor
-from backend.agents.skill_analysis import SkillAnalysisExecutor
 from backend.agents.subject_analysis import SubjectAnalysisExecutor, is_identified
 from backend.workflow.executors import (
     CLARIFY_ID,
@@ -71,7 +70,6 @@ def _course_nodes() -> dict[str, object]:
     return {
         "requirement": RequirementExecutor(id=WorkflowStep.REQUIREMENT),
         "subject": SubjectAnalysisExecutor(id=WorkflowStep.SUBJECT_ANALYSIS),
-        "skill_analysis": SkillAnalysisExecutor(id=WorkflowStep.SKILL_ANALYSIS),
         "research": ResearchExecutor(id=WorkflowStep.RESEARCH),
         "curriculum": CurriculumExecutor(id=WorkflowStep.CURRICULUM),
         "chapter": ChapterExecutor(id=WorkflowStep.CHAPTER),
@@ -85,8 +83,7 @@ def _course_nodes() -> dict[str, object]:
 
 def _add_course_tail(builder: WorkflowBuilder, nodes: dict) -> WorkflowBuilder:
     return (
-        builder.add_edge(nodes["skill_analysis"], nodes["research"])
-        .add_edge(nodes["research"], nodes["curriculum"])
+        builder.add_edge(nodes["research"], nodes["curriculum"])
         .add_edge(nodes["curriculum"], nodes["chapter"])
         .add_edge(nodes["chapter"], nodes["review"])
         # Switch-case, not two conditional edges: it picks one target per message in a single
@@ -130,7 +127,7 @@ def build_workflow() -> Workflow:
             [
                 Case(condition=_subject_not_identified, target=subject_clarify),
                 Case(condition=_needs_confirmation, target=confirm),
-                Default(target=nodes["skill_analysis"]),
+                Default(target=nodes["research"]),
             ],
         )
     )
@@ -146,5 +143,5 @@ def build_confirmed_workflow() -> Workflow:
     the search and the two model calls are not paid for twice.
     """
     nodes = _course_nodes()
-    builder = WorkflowBuilder(start_executor=nodes["skill_analysis"])
+    builder = WorkflowBuilder(start_executor=nodes["research"])
     return _add_course_tail(builder, nodes).build()

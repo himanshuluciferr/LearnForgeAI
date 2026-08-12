@@ -9,10 +9,10 @@ from backend.agents.project import (
     ProjectExecutor,
     ambition_floor,
     assemble_all,
+    audience,
     build_prompt,
     design_projects,
     folder_structure,
-    format_career_paths,
     is_usable,
 )
 from backend.workflow.state import (
@@ -20,10 +20,12 @@ from backend.workflow.state import (
     CourseState,
     Curriculum,
     ExperienceLevel,
+    IdentityStatus,
     LearningRequest,
     ProjectDraft,
     ProjectPlan,
-    SkillAnalysis,
+    SubjectAnalysis,
+    TechnicalSubjectType,
     WorkflowStep,
     progress_percent,
 )
@@ -80,13 +82,12 @@ def make_request(**overrides) -> LearningRequest:
     )
 
 
-def make_analysis(career_paths: list[str] | None = None) -> SkillAnalysis:
-    return SkillAnalysis(
-        category="Cloud",
-        difficulty=ExperienceLevel.INTERMEDIATE,
-        prerequisites=[],
-        estimated_hours=20,
-        career_paths=career_paths if career_paths is not None else ["Cloud Solution Architect"],
+def make_subject(name: str = "Azure AI Search") -> SubjectAnalysis:
+    return SubjectAnalysis(
+        identity_status=IdentityStatus.CONFIRMED,
+        canonical_name=name,
+        subject_type=TechnicalSubjectType.SERVICE,
+        description="A managed search service.",
     )
 
 
@@ -215,20 +216,21 @@ def test_no_files_means_an_empty_tree_not_a_crash():
 
 
 def test_the_prompt_lists_what_the_course_actually_teaches():
-    prompt = build_prompt(make_request(), make_analysis(), make_curriculum())
+    prompt = build_prompt(make_request(), make_subject(), make_curriculum())
 
     assert "Ch 1 Topic 1: do thing 1a; do thing 1b" in prompt
     assert "Ch 3 Topic 3" in prompt
 
 
-def test_the_prompt_names_the_roles_the_projects_are_aimed_at():
-    prompt = build_prompt(make_request(), make_analysis(["Data Engineer"]), make_curriculum())
+def test_the_projects_are_aimed_at_the_subject_that_was_identified():
+    """This replaced `career_paths`, which asked a model to invent job titles from memory."""
+    prompt = build_prompt(make_request(), make_subject("Apache Spark"), make_curriculum())
 
-    assert "Data Engineer" in prompt
+    assert "hiring for work with Apache Spark" in prompt
 
 
-def test_no_career_paths_still_gives_the_model_a_direction():
-    assert "general professional credibility" in format_career_paths(make_analysis([]))
+def test_an_unnamed_subject_still_gives_the_model_a_direction():
+    assert "this subject" in audience(make_subject(name=None))
 
 
 def test_an_experienced_learner_is_told_to_skip_tutorial_level():
@@ -243,7 +245,7 @@ def test_a_beginner_is_allowed_to_start_from_nothing():
 
 
 def test_the_prompt_states_the_exact_project_count():
-    prompt = build_prompt(make_request(), make_analysis(), make_curriculum())
+    prompt = build_prompt(make_request(), make_subject(), make_curriculum())
 
     assert f"Produce exactly {len(LEVELS)} projects." in prompt
 
@@ -256,7 +258,7 @@ async def test_the_ramp_comes_from_one_call_not_one_per_project(monkeypatch):
     """Separate calls would each reach for the most obvious idea and repeat each other."""
     agent = use_stub(monkeypatch, StubAgent())
 
-    await design_projects(make_request(), make_analysis(), make_curriculum())
+    await design_projects(make_request(), make_subject(), make_curriculum())
 
     assert len(agent.prompts) == 1
 
@@ -265,7 +267,7 @@ async def test_the_ramp_comes_from_one_call_not_one_per_project(monkeypatch):
 async def test_the_executor_marks_the_step_and_forwards_state(monkeypatch):
     use_stub(monkeypatch, StubAgent())
     state = CourseState(job_id="j", user_id="u", prompt="p", request=make_request())
-    state.skill_analysis = make_analysis()
+    state.subject = make_subject()
     state.curriculum = make_curriculum()
     ctx = CapturingContext()
 
@@ -280,7 +282,6 @@ def test_progress_reaches_eighty_six_percent_once_projects_are_designed():
     done = [
         WorkflowStep.REQUIREMENT,
         WorkflowStep.SUBJECT_ANALYSIS,
-        WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,
         WorkflowStep.CHAPTER,

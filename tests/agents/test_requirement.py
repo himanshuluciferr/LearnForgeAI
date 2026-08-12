@@ -14,7 +14,7 @@ from backend.workflow.state import (
     StatedExperience,
     WorkflowStep,
 )
-from backend.workflow.workflow import _is_not_learning_request
+from backend.workflow.workflow import _is_not_learning_request, _needs_clarification
 
 
 class CapturingContext:
@@ -135,3 +135,53 @@ def test_rejection_edge_fires_only_for_off_topic_prompts(request_, routes_to_rej
     state = CourseState(job_id="j1", user_id="u1", prompt="p", request=request_)
 
     assert _is_not_learning_request(state) is routes_to_rejection
+
+
+@pytest.mark.parametrize(
+    ("request_", "expected"),
+    [
+        (None, (False, False)),
+        (LearningRequest(is_learning_request=True, skill="Rust"), (False, False)),
+        (LearningRequest(is_learning_request=False), (True, False)),
+        (
+            LearningRequest(is_learning_request=True, alternatives=["React", "Vue"]),
+            (False, True),
+        ),
+        (
+            LearningRequest(
+                is_learning_request=True, missing_requirements=[MissingRequirement.SKILL]
+            ),
+            (False, True),
+        ),
+        (LearningRequest(is_learning_request=True), (False, True)),
+    ],
+    ids=[
+        "not-yet-extracted",
+        "clear-request",
+        "off-topic",
+        "unanswered-choice",
+        "too-broad",
+        "no-skill-at-all",
+    ],
+)
+def test_at_most_one_early_exit_claims_a_request(request_, expected):
+    """The default route carries anything neither case claims, so overlap is the only danger.
+
+    An off-topic prompt has no skill either, so the clarify case must stand down for it —
+    otherwise small talk would be answered with a question about which skill to learn.
+    """
+    state = CourseState(job_id="j1", user_id="u1", prompt="p", request=request_)
+
+    assert (_is_not_learning_request(state), _needs_clarification(state)) == expected
+
+
+def test_naming_one_alternative_is_not_a_choice_to_make():
+    """A single entry means the model listed something it had already settled on."""
+    state = CourseState(
+        job_id="j1",
+        user_id="u1",
+        prompt="p",
+        request=LearningRequest(is_learning_request=True, skill="Vue", alternatives=["Vue"]),
+    )
+
+    assert not _needs_clarification(state)

@@ -17,7 +17,6 @@ from backend.agents import quiz as quiz_mod
 from backend.agents import requirement as requirement_mod
 from backend.agents import research as research_mod
 from backend.agents import review as review_mod
-from backend.agents import skill_analysis as skill_mod
 from backend.agents import subject_analysis as subject_mod
 from backend.workflow import executors as executors_mod
 from backend.workflow.state import (
@@ -30,7 +29,6 @@ from backend.workflow.state import (
     IdentityStatus,
     LearningRequest,
     ReviewResult,
-    SkillAnalysis,
     SubjectAnalysis,
     SubjectTrace,
     TechnicalSubjectType,
@@ -51,13 +49,11 @@ REQUEST = LearningRequest(
     goal="g",
     daily_minutes=30,
 )
-ANALYSIS = SkillAnalysis(
-    category="Cloud", difficulty=ExperienceLevel.BEGINNER, estimated_hours=10
-)
 SUBJECT = SubjectAnalysis(
     identity_status=IdentityStatus.CONFIRMED,
     canonical_name="s",
     subject_type=TechnicalSubjectType.PLATFORM,
+    scope=["a", "b"],
 )
 
 
@@ -86,7 +82,6 @@ def stub_agents(monkeypatch):
     # Node 2 searches and fetches for real, so an unstubbed graph run reaches the network and
     # the offline suite silently starts making live calls.
     monkeypatch.setattr(subject_mod, "investigate", returning((SUBJECT, [], SubjectTrace())))
-    monkeypatch.setattr(skill_mod, "analyse_skill", returning(ANALYSIS))
     monkeypatch.setattr(research_mod, "gather_sources", returning([]))
     monkeypatch.setattr(curriculum_mod, "plan_curriculum", returning(CURRICULUM))
     monkeypatch.setattr(chapter_mod, "write_chapters", returning(CHAPTERS))

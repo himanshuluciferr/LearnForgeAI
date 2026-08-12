@@ -53,7 +53,6 @@ def review_cases() -> list[tuple[str | None, str]]:
 def test_every_step_hands_to_the_next_one():
     """review is absent from this chain because it routes through a switch-case group."""
     chain = [
-        WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,
         WorkflowStep.CHAPTER,
@@ -141,7 +140,7 @@ def test_an_identified_subject_is_shown_to_the_learner_before_it_is_built():
 def test_an_approved_subject_falls_through_to_the_course():
     assert cases_out_of(str(WorkflowStep.SUBJECT_ANALYSIS))[-1] == (
         None,
-        str(WorkflowStep.SKILL_ANALYSIS),
+        str(WorkflowStep.RESEARCH),
     )
 
 
@@ -150,7 +149,7 @@ def test_the_second_run_starts_after_the_subject_was_settled():
     fresh one that replays the analysis rather than paying for it again."""
     started = build_confirmed_workflow().start_executor_id
 
-    assert str(started) == str(WorkflowStep.SKILL_ANALYSIS)
+    assert str(started) == str(WorkflowStep.RESEARCH)
 
 
 def test_the_second_run_cannot_re_ask_the_learner():

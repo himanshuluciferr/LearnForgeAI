@@ -7,15 +7,15 @@ from backend.agents.curriculum import plan_chapter_count, plan_curriculum
 from backend.config.settings import get_settings
 from backend.workflow.state import (
     ExperienceLevel,
+    IdentityStatus,
     LearningRequest,
     ResearchSource,
     ResourceKind,
-    SkillAnalysis,
+    SubjectAnalysis,
+    TechnicalSubjectType,
 )
 
 pytestmark = [pytest.mark.live, pytest.mark.asyncio(loop_scope="module")]
-
-ESTIMATED_HOURS = 60
 
 REQUEST = LearningRequest(
     is_learning_request=True,
@@ -24,12 +24,22 @@ REQUEST = LearningRequest(
     goal="add search to our intranet",
     daily_minutes=30,
 )
-ANALYSIS = SkillAnalysis(
-    category="Cloud",
-    difficulty=ExperienceLevel.INTERMEDIATE,
-    estimated_hours=ESTIMATED_HOURS,
+SUBJECT = SubjectAnalysis(
+    identity_status=IdentityStatus.CONFIRMED,
+    canonical_name="Azure AI Search",
+    subject_type=TechnicalSubjectType.SERVICE,
+    description="A managed search service on Azure.",
+    scope=[
+        "indexes",
+        "indexers",
+        "skillsets",
+        "analyzers",
+        "scoring profiles",
+        "vector search",
+        "semantic ranking",
+        "security",
+    ],
     prerequisites=["REST basics", "An Azure subscription"],
-    career_paths=["Search Engineer"],
 )
 SOURCES = [
     ResearchSource(
@@ -47,12 +57,12 @@ async def curriculum():
     if not get_settings().foundry_project_endpoint:
         pytest.skip("FOUNDRY_PROJECT_ENDPOINT is not set")
 
-    return await plan_curriculum(REQUEST, ANALYSIS, SOURCES)
+    return await plan_curriculum(REQUEST, SUBJECT, SOURCES)
 
 
 async def test_chapter_count_follows_the_number_we_asked_for(curriculum):
     # The model is told an exact count; allow a little drift but not a different course.
-    expected = plan_chapter_count(ESTIMATED_HOURS)
+    expected = plan_chapter_count(SUBJECT)
 
     assert abs(len(curriculum.chapters) - expected) <= 2
 

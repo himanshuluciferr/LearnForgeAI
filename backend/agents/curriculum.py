@@ -15,7 +15,7 @@ from backend.workflow.state import (
     ExperienceLevel,
     LearningRequest,
     ResearchSource,
-    SkillAnalysis,
+    SubjectAnalysis,
     WorkflowStep,
 )
 
@@ -27,9 +27,6 @@ AGENT_NAME = "curriculum-agent"
 MAX_CHAPTERS = 20
 MIN_CHAPTERS = 5
 
-# Study hours one chapter is expected to account for, including its exercises.
-HOURS_PER_CHAPTER = 6
-
 
 @lru_cache
 def get_curriculum_agent() -> Agent:
@@ -40,9 +37,15 @@ def get_curriculum_agent() -> Agent:
     )
 
 
-def plan_chapter_count(estimated_hours: int) -> int:
-    """Arithmetic, not a judgement call, so we work it out and hand the model the answer."""
-    return max(MIN_CHAPTERS, min(MAX_CHAPTERS, round(estimated_hours / HOURS_PER_CHAPTER)))
+def plan_chapter_count(subject: SubjectAnalysis) -> int:
+    """One chapter per area the documents say the subject covers.
+
+    This used to divide an `estimated_hours` the model supplied, which was measured swinging
+    40/120/40 on one subject across three runs — a 3x difference in course length from noise.
+    Counting the areas that were actually found is at least grounded in what was read.
+    ⚠️ The stability of `len(scope)` across runs is not yet measured; the clamp bounds it.
+    """
+    return max(MIN_CHAPTERS, min(MAX_CHAPTERS, len(subject.scope)))
 
 
 def format_sources(sources: list[ResearchSource]) -> str:
@@ -64,21 +67,20 @@ def starting_point(request: LearningRequest) -> str:
 
 
 def build_prompt(
-    request: LearningRequest, analysis: SkillAnalysis, sources: list[ResearchSource]
+    request: LearningRequest, subject: SubjectAnalysis, sources: list[ResearchSource]
 ) -> str:
-    chapters = plan_chapter_count(analysis.estimated_hours)
-    study_days = round(analysis.estimated_hours * 60 / request.minutes_per_day)
-    prerequisites = ", ".join(analysis.prerequisites) or "none"
+    chapters = plan_chapter_count(subject)
+    prerequisites = ", ".join(subject.prerequisites) or "none"
     return (
-        f"Skill: {request.skill}\n"
-        f"Field: {analysis.category}\n"
-        f"Skill difficulty: {analysis.difficulty}\n"
+        f"Skill: {subject.canonical_name or request.skill}\n"
+        f"What it is: {subject.description}\n"
+        f"Areas it covers: {', '.join(subject.scope) or 'not established'}\n"
         f"Learner's current level: {request.assumed_level}\n"
         f"Goal: {request.goal or 'not stated'}\n"
         f"Assumed knowledge, do not teach: {prerequisites}\n"
         f"Where to start: {starting_point(request)}\n"
-        f"Course length: about {analysis.estimated_hours} hours, "
-        f"roughly {study_days} days at {request.minutes_per_day} minutes a day\n"
+        f"Course length: {chapters} chapters, one sitting of about "
+        f"{request.minutes_per_day} minutes each\n"
         f"Course language: {request.language}\n"
         f"Produce exactly {chapters} chapters.\n\n"
         f"Verified sources:\n{format_sources(sources)}"
@@ -101,9 +103,9 @@ def tidy(curriculum: Curriculum) -> Curriculum:
 
 
 async def plan_curriculum(
-    request: LearningRequest, analysis: SkillAnalysis, sources: list[ResearchSource]
+    request: LearningRequest, subject: SubjectAnalysis, sources: list[ResearchSource]
 ) -> Curriculum:
-    response = await get_curriculum_agent().run(build_prompt(request, analysis, sources))
+    response = await get_curriculum_agent().run(build_prompt(request, subject, sources))
     curriculum: Curriculum = response.value
 
     # Unlike missing research, a course with no chapters is not a degraded result but a broken one.
@@ -118,9 +120,7 @@ class CurriculumExecutor(Executor):
 
     @handler
     async def run(self, state: CourseState, ctx: WorkflowContext[CourseState]) -> None:
-        assert state.request is not None and state.skill_analysis is not None
-        state.curriculum = await plan_curriculum(
-            state.request, state.skill_analysis, state.research
-        )
+        assert state.request is not None and state.subject is not None
+        state.curriculum = await plan_curriculum(state.request, state.subject, state.research)
         state.mark(WorkflowStep.CURRICULUM)
         await ctx.send_message(state)

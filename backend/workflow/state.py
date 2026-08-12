@@ -24,7 +24,6 @@ MAX_REVISIONS = 2
 class WorkflowStep(StrEnum):
     REQUIREMENT = "requirement"
     SUBJECT_ANALYSIS = "subject-analysis"
-    SKILL_ANALYSIS = "skill-analysis"
     RESEARCH = "research"
     CURRICULUM = "curriculum"
     CHAPTER = "chapter"
@@ -44,8 +43,7 @@ STEP_WEIGHTS: dict[WorkflowStep, int] = {
     WorkflowStep.REQUIREMENT: 5,
     # Real retrieval: one search, a page fetch each for two or three sources, two model calls.
     WorkflowStep.SUBJECT_ANALYSIS: 5,
-    WorkflowStep.SKILL_ANALYSIS: 2,
-    WorkflowStep.RESEARCH: 8,
+    WorkflowStep.RESEARCH: 10,
     WorkflowStep.CURRICULUM: 10,
     WorkflowStep.CHAPTER: 30,
     # One call per chapter plus a whole-syllabus pass, so it costs more than the 5 it started with.
@@ -346,34 +344,6 @@ class SubjectTrace(BaseModel):
     searches: list[str] = Field(default_factory=list)
     fetched_urls: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
-
-
-class SkillAnalysis(BaseModel):
-    """Output of skill-analysis-agent — how big the topic is and where it leads."""
-
-    category: str = Field(
-        description="Broad field this skill belongs to, e.g. 'Cloud', 'Data Engineering'."
-    )
-    difficulty: ExperienceLevel = Field(
-        description="How hard the skill is in itself, independent of this learner's level."
-    )
-    prerequisites: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Skills that genuinely block starting. Empty for self-contained beginner topics. "
-            "Never list the skill itself, general computer literacy, or ordinary tools "
-            "such as a text editor, a browser or a git host."
-        ),
-    )
-    estimated_hours: int = Field(
-        ge=1,
-        le=500,
-        description="Hours to reach the learner's stated goal, not to master the whole field.",
-    )
-    career_paths: list[str] = Field(
-        default_factory=list,
-        description="Real job titles this skill contributes to, e.g. 'Cloud Solution Architect'.",
-    )
 
 
 class ResourceKind(StrEnum):
@@ -788,7 +758,6 @@ class CourseState(BaseModel):
     # Set when the learner has already approved this subject, which is what lets a second run
     # skip straight past the nodes that produced it.
     subject_confirmed: bool = False
-    skill_analysis: SkillAnalysis | None = None
     research: list[ResearchSource] = Field(default_factory=list)
     curriculum: Curriculum | None = None
     chapters: list[Chapter] = Field(default_factory=list)

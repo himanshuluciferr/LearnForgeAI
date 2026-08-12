@@ -17,7 +17,7 @@ from backend.workflow.state import (
     Project,
     ProjectDraft,
     ProjectPlan,
-    SkillAnalysis,
+    SubjectAnalysis,
     WorkflowStep,
 )
 
@@ -151,23 +151,26 @@ def format_chapters(curriculum: Curriculum) -> str:
     )
 
 
-def format_career_paths(analysis: SkillAnalysis) -> str:
-    if not analysis.career_paths:
-        return "No specific roles were identified, so aim at general professional credibility."
-    roles = ", ".join(analysis.career_paths)
-    return f"These projects should read well to someone hiring for: {roles}."
+def audience(subject: SubjectAnalysis) -> str:
+    """Replaces `career_paths`, which asked a model to invent job titles from memory. The steer
+    it existed for — aim at professional credibility, not tutorial exercises — needs no list."""
+    name = subject.canonical_name or "this subject"
+    return (
+        f"These projects should read well to someone hiring for work with {name}. "
+        "Aim at something finished, not an exercise."
+    )
 
 
 def build_prompt(
-    request: LearningRequest, analysis: SkillAnalysis, curriculum: Curriculum
+    request: LearningRequest, subject: SubjectAnalysis, curriculum: Curriculum
 ) -> str:
     return (
-        f"Skill: {request.skill}\n"
+        f"Skill: {subject.canonical_name or request.skill}\n"
         f"Learner's goal: {request.goal or 'not stated'}\n"
         f"Course language: {request.language}\n"
         f"Produce exactly {len(LEVELS)} projects.\n\n"
         f"{ambition_floor(request)}\n"
-        f"{format_career_paths(analysis)}\n\n"
+        f"{audience(subject)}\n\n"
         f"Course: {curriculum.title}\n"
         f"{curriculum.summary}\n\n"
         f"What the course teaches, and therefore what the projects may use:\n"
@@ -176,7 +179,7 @@ def build_prompt(
 
 
 async def design_projects(
-    request: LearningRequest, analysis: SkillAnalysis, curriculum: Curriculum
+    request: LearningRequest, subject: SubjectAnalysis, curriculum: Curriculum
 ) -> list[Project]:
     """One call, not one per project.
 
@@ -184,7 +187,7 @@ async def design_projects(
     decision, and three separate calls would each reach for the most obvious idea.
     """
     logger.info("project-agent: designing %d projects", len(LEVELS))
-    response = await get_project_agent().run(build_prompt(request, analysis, curriculum))
+    response = await get_project_agent().run(build_prompt(request, subject, curriculum))
     return assemble_all(response.value)
 
 
@@ -194,9 +197,7 @@ class ProjectExecutor(Executor):
     @handler
     async def run(self, state: CourseState, ctx: WorkflowContext[CourseState]) -> None:
         assert state.request is not None and state.curriculum is not None
-        assert state.skill_analysis is not None
-        state.projects = await design_projects(
-            state.request, state.skill_analysis, state.curriculum
-        )
+        assert state.subject is not None
+        state.projects = await design_projects(state.request, state.subject, state.curriculum)
         state.mark(WorkflowStep.PROJECT)
         await ctx.send_message(state)

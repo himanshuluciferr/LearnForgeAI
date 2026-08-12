@@ -239,12 +239,12 @@ deterministic and needs no LLM, and one (`mentor`) lives outside the graph entir
 | # | Agent | Reads from state | Writes to state | Status |
 |---|---|---|---|---|
 | 1 | `requirement-agent` | `prompt` | `request` | ✅ |
-| 2 | `skill-analysis-agent` | `request` | `skill_analysis` | ✅ |
-| 3 | `research-agent` | `request`, `skill_analysis` | `research` | ✅ |
-| 4 | `curriculum-agent` | `research`, `skill_analysis` | `curriculum` | ✅ |
+| 2 | `subject-analysis-agent` | `request` | `subject`, `sources`, `subject_trace` | ✅ |
+| 3 | `research-agent` | `request`, `subject` | `research` | ✅ |
+| 4 | `curriculum-agent` | `research`, `subject` | `curriculum` | ✅ |
 | 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | ✅ |
 | 6 | `practice-agent` | `chapters` | `practice` | ✅ |
-| 7 | `project-agent` | `curriculum`, `skill_analysis` | `projects` | ✅ |
+| 7 | `project-agent` | `curriculum`, `subject` | `projects` | ✅ |
 | 8 | `quiz-agent` | `chapters` | `quizzes` | ✅ |
 | 9 | `review-agent` | `chapters` + `curriculum` | `review` | ✅ |
 | — | `publisher` (no LLM) | `curriculum`, `chapters`, `practice`, `projects`, `quizzes` | `published` | ✅ |
@@ -355,9 +355,11 @@ Designs the chapter list: titles, ordering, learning objectives per chapter, pac
 `daily_minutes`. A separate planning pass beats letting the chapter writer improvise,
 because a plan can be checked for coverage and progression before expensive prose is generated.
 
-Two numbers are computed rather than asked for. `plan_chapter_count()` derives the count from
-`estimated_hours / HOURS_PER_CHAPTER`, clamped to `MIN_CHAPTERS..MAX_CHAPTERS`, and the prompt
-states it as a fixed requirement. `tidy()` then trims to the cap and renumbers, so chapter
+Two numbers are computed rather than asked for. `plan_chapter_count()` takes one chapter per
+area `subject-analysis` found the subject to cover, clamped to `MIN_CHAPTERS..MAX_CHAPTERS`, and
+the prompt states it as a fixed requirement. It used to divide a model-supplied
+`estimated_hours`, which was measured swinging 40/120/40 on one subject across three runs — a 3x
+difference in course length from noise. `tidy()` then trims to the cap and renumbers, so chapter
 numbers are ours. The cap matters beyond tidiness: `chapter-agent` writes prose per chapter,
 so `MAX_CHAPTERS` bounds the most expensive step in the graph.
 
@@ -727,7 +729,7 @@ class CourseState(BaseModel):
     prompt: str                                  # raw Teams text
 
     request: LearningRequest | None              # agent 1
-    skill_analysis: SkillAnalysis | None         # agent 2
+    subject: SubjectAnalysis | None              # agent 2
     research: list[ResearchSource]               # agent 3
     curriculum: Curriculum | None                # agent 4
     chapters: list[Chapter]                      # agent 5

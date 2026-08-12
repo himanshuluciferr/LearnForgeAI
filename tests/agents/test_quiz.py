@@ -330,7 +330,6 @@ def test_progress_reaches_seventy_six_percent_once_the_quiz_is_marked():
     done = [
         WorkflowStep.REQUIREMENT,
         WorkflowStep.SUBJECT_ANALYSIS,
-        WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,
         WorkflowStep.CHAPTER,

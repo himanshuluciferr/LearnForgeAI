@@ -9,8 +9,10 @@ from backend.workflow.state import (
     ChapterOutline,
     Curriculum,
     ExperienceLevel,
+    IdentityStatus,
     LearningRequest,
-    SkillAnalysis,
+    SubjectAnalysis,
+    TechnicalSubjectType,
 )
 
 pytestmark = [pytest.mark.live, pytest.mark.asyncio(loop_scope="module")]
@@ -22,12 +24,12 @@ REQUEST = LearningRequest(
     goal="add search to an internal document portal",
     daily_minutes=45,
 )
-ANALYSIS = SkillAnalysis(
-    category="Cloud",
-    difficulty=ExperienceLevel.INTERMEDIATE,
+SUBJECT = SubjectAnalysis(
+    identity_status=IdentityStatus.CONFIRMED,
+    canonical_name="Azure AI Search",
+    subject_type=TechnicalSubjectType.SERVICE,
+    description="A managed search service on Azure.",
     prerequisites=["basic REST"],
-    estimated_hours=25,
-    career_paths=["Cloud Solution Architect", "Search Engineer"],
 )
 CURRICULUM = Curriculum(
     title="Azure AI Search from indexing to ranking",
@@ -63,7 +65,7 @@ async def projects():
     if not get_settings().foundry_project_endpoint:
         pytest.skip("FOUNDRY_PROJECT_ENDPOINT is not set")
 
-    return await design_projects(REQUEST, ANALYSIS, CURRICULUM)
+    return await design_projects(REQUEST, SUBJECT, CURRICULUM)
 
 
 async def test_the_ramp_is_complete_and_in_order(projects):

@@ -5,7 +5,14 @@ import pytest_asyncio
 
 from backend.agents.research import MAX_SOURCES, gather_sources
 from backend.config.settings import get_settings
-from backend.workflow.state import ExperienceLevel, LearningRequest, ResourceKind, SkillAnalysis
+from backend.workflow.state import (
+    ExperienceLevel,
+    IdentityStatus,
+    LearningRequest,
+    ResourceKind,
+    SubjectAnalysis,
+    TechnicalSubjectType,
+)
 
 # loop_scope matches the fixture scope so one live call can be shared by every test.
 pytestmark = [pytest.mark.live, pytest.mark.asyncio(loop_scope="module")]
@@ -26,12 +33,13 @@ async def sources():
             experience=ExperienceLevel.BEGINNER,
             goal="add search to our intranet",
         ),
-        SkillAnalysis(
-            category="Cloud",
-            difficulty=ExperienceLevel.INTERMEDIATE,
-            estimated_hours=60,
+        SubjectAnalysis(
+            identity_status=IdentityStatus.CONFIRMED,
+            canonical_name="Azure AI Search",
+            subject_type=TechnicalSubjectType.SERVICE,
+            description="A managed search service on Azure.",
+            scope=["indexes", "indexers", "skillsets"],
             prerequisites=["REST basics"],
-            career_paths=["Search Engineer"],
         ),
     )
 

@@ -26,7 +26,9 @@ from backend.workflow.state import (
     Project,
     Quiz,
     QuizQuestion,
-    SkillAnalysis,
+    SubjectAnalysis,
+    IdentityStatus,
+    TechnicalSubjectType,
 )
 
 REQUEST = LearningRequest(
@@ -238,17 +240,19 @@ def test_the_document_opens_with_the_course_title_and_contents():
     assert "Chapter 1: Chapter body 1" in document
 
 
-def test_the_estimated_hours_appear_when_the_skill_was_analysed():
-    analysis = SkillAnalysis(
-        category="Tooling", difficulty=ExperienceLevel.BEGINNER, estimated_hours=12
+def test_the_header_prefers_the_name_the_documents_used():
+    subject = SubjectAnalysis(
+        identity_status=IdentityStatus.CONFIRMED,
+        canonical_name="Git",
+        subject_type=TechnicalSubjectType.TOOL,
     )
 
-    assert "**Estimated:** 12 hours" in render_course(state(skill_analysis=analysis))
+    assert "**Skill:** Git" in render_course(state(subject=subject))
 
 
-def test_a_course_generated_without_a_skill_analysis_still_renders():
+def test_a_course_generated_without_a_subject_still_renders():
     """Every field but curriculum and chapters is degraded, not broken."""
-    assert "Estimated" not in render_course(state())
+    assert "**Skill:**" in render_course(state())
 
 
 def test_practice_follows_the_chapter_it_belongs_to():

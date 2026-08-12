@@ -16,7 +16,7 @@ from backend.workflow.state import (
     LearningRequest,
     ResearchBundle,
     ResearchSource,
-    SkillAnalysis,
+    SubjectAnalysis,
     WorkflowStep,
 )
 
@@ -37,24 +37,23 @@ def get_research_agent() -> Agent:
     )
 
 
-def build_prompt(request: LearningRequest, analysis: SkillAnalysis) -> str:
-    prerequisites = ", ".join(analysis.prerequisites) or "none"
+def build_prompt(request: LearningRequest, subject: SubjectAnalysis) -> str:
+    prerequisites = ", ".join(subject.prerequisites) or "none"
     return (
-        f"Skill: {request.skill}\n"
-        f"Field: {analysis.category}\n"
-        f"Skill difficulty: {analysis.difficulty}\n"
+        f"Skill: {subject.canonical_name or request.skill}\n"
+        f"What it is: {subject.description}\n"
+        f"Areas it covers: {', '.join(subject.scope) or 'not established'}\n"
         f"Learner's current level: {request.assumed_level}\n"
         f"Goal: {request.goal or 'not stated'}\n"
-        f"Assumed prerequisites: {prerequisites}\n"
-        f"Course size: about {analysis.estimated_hours} hours"
+        f"Assumed prerequisites: {prerequisites}"
     )
 
 
 async def gather_sources(
-    request: LearningRequest, analysis: SkillAnalysis
+    request: LearningRequest, subject: SubjectAnalysis
 ) -> list[ResearchSource]:
     """Propose, then verify, then rank. Only the proposing step involves the model."""
-    response = await get_research_agent().run(build_prompt(request, analysis))
+    response = await get_research_agent().run(build_prompt(request, subject))
     proposed = response.value.sources[:MAX_SOURCES]
 
     verified = await verify_sources(proposed)
@@ -70,8 +69,8 @@ class ResearchExecutor(Executor):
 
     @handler
     async def run(self, state: CourseState, ctx: WorkflowContext[CourseState]) -> None:
-        assert state.request is not None and state.skill_analysis is not None
+        assert state.request is not None and state.subject is not None
         # An empty list is a valid outcome: an ungrounded course still beats a failed job.
-        state.research = await gather_sources(state.request, state.skill_analysis)
+        state.research = await gather_sources(state.request, state.subject)
         state.mark(WorkflowStep.RESEARCH)
         await ctx.send_message(state)

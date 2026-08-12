@@ -11,7 +11,9 @@ from backend.workflow.state import (
     ResearchBundle,
     ResearchSource,
     ResourceKind,
-    SkillAnalysis,
+    SubjectAnalysis,
+    TechnicalSubjectType,
+    IdentityStatus,
     WorkflowStep,
     progress_percent,
 )
@@ -49,13 +51,14 @@ def make_request() -> LearningRequest:
     )
 
 
-def make_analysis() -> SkillAnalysis:
-    return SkillAnalysis(
-        category="Cloud",
-        difficulty=ExperienceLevel.INTERMEDIATE,
-        estimated_hours=60,
+def make_subject() -> SubjectAnalysis:
+    return SubjectAnalysis(
+        identity_status=IdentityStatus.CONFIRMED,
+        canonical_name="Azure AI Search",
+        subject_type=TechnicalSubjectType.SERVICE,
+        description="A managed search service.",
+        scope=["indexes", "skillsets"],
         prerequisites=["REST basics", "An Azure subscription"],
-        career_paths=["Search Engineer"],
     )
 
 
@@ -64,19 +67,18 @@ def make_source(url: str, kind: ResourceKind = ResourceKind.DOCS) -> ResearchSou
 
 
 def test_prompt_carries_both_upstream_agents_output():
-    prompt = build_prompt(make_request(), make_analysis())
+    prompt = build_prompt(make_request(), make_subject())
 
     assert "Azure AI Search" in prompt
-    assert "Cloud" in prompt
-    assert "intermediate" in prompt  # the skill's difficulty
+    assert "A managed search service." in prompt
+    assert "indexes" in prompt
     assert "beginner" in prompt  # the learner's level
     assert "add search to our intranet" in prompt
     assert "REST basics" in prompt
-    assert "60" in prompt
 
 
 def test_prompt_says_none_rather_than_leaving_prerequisites_blank():
-    analysis = make_analysis()
+    analysis = make_subject()
     analysis.prerequisites = []
 
     assert "none" in build_prompt(make_request(), analysis)
@@ -98,7 +100,7 @@ async def test_dead_links_are_dropped_and_survivors_are_ranked(monkeypatch):
 
     monkeypatch.setattr(research_module, "verify_sources", fake_verify)
 
-    sources = await gather_sources(make_request(), make_analysis())
+    sources = await gather_sources(make_request(), make_subject())
 
     assert [s.url for s in sources] == [
         "https://learn.microsoft.com/azure/search/",  # docs outrank blogs
@@ -119,7 +121,7 @@ async def test_the_model_cannot_make_us_fetch_more_than_the_cap(monkeypatch):
 
     monkeypatch.setattr(research_module, "verify_sources", fake_verify)
 
-    await gather_sources(make_request(), make_analysis())
+    await gather_sources(make_request(), make_subject())
 
     assert seen == [MAX_SOURCES]
 
@@ -133,7 +135,7 @@ async def test_executor_stores_sources_and_forwards_state(monkeypatch):
 
     state = CourseState(job_id="j", user_id="u", prompt="p")
     state.request = make_request()
-    state.skill_analysis = make_analysis()
+    state.subject = make_subject()
     ctx = CapturingContext()
 
     await ResearchExecutor(id=WorkflowStep.RESEARCH).run(state, ctx)
@@ -152,7 +154,7 @@ async def test_finding_nothing_still_completes_the_step(monkeypatch):
 
     state = CourseState(job_id="j", user_id="u", prompt="p")
     state.request = make_request()
-    state.skill_analysis = make_analysis()
+    state.subject = make_subject()
 
     await ResearchExecutor(id=WorkflowStep.RESEARCH).run(state, CapturingContext())
 
@@ -164,7 +166,6 @@ def test_three_nodes_report_twenty_percent():
     completed = [
         WorkflowStep.REQUIREMENT,
         WorkflowStep.SUBJECT_ANALYSIS,
-        WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
     ]
 

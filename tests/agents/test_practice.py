@@ -283,7 +283,6 @@ def test_progress_reaches_sixty_eight_percent_once_practice_is_set():
     completed = [
         WorkflowStep.REQUIREMENT,
         WorkflowStep.SUBJECT_ANALYSIS,
-        WorkflowStep.SKILL_ANALYSIS,
         WorkflowStep.RESEARCH,
         WorkflowStep.CURRICULUM,
         WorkflowStep.CHAPTER,
