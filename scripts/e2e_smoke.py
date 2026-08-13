@@ -30,6 +30,10 @@ OLD_CHARS_PER_SOURCE = 4_000
 BASE = "http://127.0.0.1:8000"
 USER = "e2e-publisher-user"
 
+# Overridable because git rebase is something the model knows cold, so a grounded course and a
+# recalled one look identical. Pass a subject it does not know to tell them apart.
+DEFAULT_PROMPT = "Teach me git rebase, 20 minutes a day, beginner"
+
 # Statuses the run will not leave on its own. `needs-choice` is one of them: the learner named
 # several skills, or none, and is expected to ask again rather than be waited for.
 TERMINAL = ("completed", "failed", "rejected", "needs-choice")
@@ -115,10 +119,12 @@ def report_selection(state) -> None:
 
 
 async def main():
+    prompt = " ".join(sys.argv[1:]) or DEFAULT_PROMPT
+    print(f"prompt: {prompt}", flush=True)
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as api:
         accepted = await api.post(
             "/courses",
-            json={"user_id": USER, "prompt": "Teach me git rebase, 20 minutes a day, beginner"},
+            json={"user_id": USER, "prompt": prompt},
         )
         accepted.raise_for_status()
         job_id = accepted.json()["job_id"]
