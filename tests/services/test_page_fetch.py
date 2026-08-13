@@ -141,3 +141,98 @@ def test_the_user_agent_carries_a_contact_url():
     """Wikimedia 403s a vague contact string on both its API and REST endpoints, and returns
     200 as soon as the User-Agent names somewhere to complain to."""
     assert "https://" in USER_AGENT
+
+
+TREE_URL = "https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents"
+LISTING = [
+    {"type": "file", "name": "chat.py", "download_url": "https://raw.githubusercontent.com/a.py"},
+    {"type": "file", "name": "logo.png", "download_url": "https://raw.githubusercontent.com/b.png"},
+    {"type": "dir", "name": "nested", "download_url": None},
+]
+
+
+@pytest.mark.asyncio
+async def test_a_github_folder_is_read_as_code_not_as_a_list_of_file_names(monkeypatch):
+    """A measured failure: two sample folders yielded 515 and 588 words of directory listing,
+    and the chapters then invented the API that was sitting in the files."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return httpx.Response(200, json=LISTING)
+        return httpx.Response(200, text="from agent_framework import Agent\n" * 60)
+
+    monkeypatch.setattr(page_fetch.httpx, "AsyncClient", transport(handler))
+
+    documents = await fetch_documents([hit(TREE_URL)], limit=5)
+
+    assert len(documents) == 1
+    assert "from agent_framework import Agent" in documents[0].text
+    # The URL the learner is cited stays the folder they can browse, not the raw file.
+    assert documents[0].url == TREE_URL
+
+
+@pytest.mark.asyncio
+async def test_only_source_files_in_a_folder_are_downloaded(monkeypatch):
+    downloaded: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return httpx.Response(200, json=LISTING)
+        downloaded.append(str(request.url))
+        return httpx.Response(200, text="x " * 200)
+
+    monkeypatch.setattr(page_fetch.httpx, "AsyncClient", transport(handler))
+
+    await fetch_documents([hit(TREE_URL)], limit=5)
+
+    assert downloaded == ["https://raw.githubusercontent.com/a.py"]
+
+
+@pytest.mark.asyncio
+async def test_a_download_url_from_the_api_still_passes_the_ssrf_boundary(monkeypatch):
+    """`download_url` is supplied by GitHub, which makes it input to our fetcher, not a fact."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "type": "file",
+                        "name": "evil.py",
+                        "download_url": "https://169.254.169.254/metadata",
+                    }
+                ],
+            )
+        raise AssertionError(f"fetched a blocked address: {request.url}")
+
+    monkeypatch.setattr(page_fetch.httpx, "AsyncClient", transport(handler))
+
+    assert await fetch_documents([hit(TREE_URL)], limit=5) == []
+
+
+@pytest.mark.asyncio
+async def test_a_github_file_is_read_raw_rather_than_stripped_of_its_syntax(monkeypatch):
+    code = "def build() -> Workflow:\n    return WorkflowBuilder(start_executor=first).build()\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "raw.githubusercontent.com"
+        return httpx.Response(200, text=code * 20)
+
+    monkeypatch.setattr(page_fetch.httpx, "AsyncClient", transport(handler))
+
+    documents = await fetch_documents(
+        [hit("https://github.com/microsoft/agent-framework/blob/main/python/x.py")], limit=5
+    )
+
+    # extract_text would have eaten `-> Workflow` as if it were a tag.
+    assert "-> Workflow" in documents[0].text
+
+
+@pytest.mark.asyncio
+async def test_a_folder_whose_listing_fails_narrows_the_evidence(monkeypatch):
+    monkeypatch.setattr(
+        page_fetch.httpx, "AsyncClient", transport(lambda r: httpx.Response(403, text="rate limit"))
+    )
+
+    assert await fetch_documents([hit(TREE_URL)], limit=5) == []

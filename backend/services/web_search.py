@@ -64,7 +64,7 @@ async def search_learn(query: str, limit: int = 8) -> list[SearchHit]:
     ]
 
 
-def _github_headers() -> dict[str, str]:
+def github_headers() -> dict[str, str]:
     headers = {"Accept": "application/vnd.github+json"}
     token = get_settings().github_token
     if token:
@@ -74,7 +74,7 @@ def _github_headers() -> dict[str, str]:
 
 async def _github_pass(client: httpx.AsyncClient, query: str, limit: int) -> list[SearchHit]:
     response = await client.get(
-        GITHUB_URL, params={"q": query, "per_page": limit}, headers=_github_headers()
+        GITHUB_URL, params={"q": query, "per_page": limit}, headers=github_headers()
     )
     if response.status_code >= 400:
         # Unauthenticated search allows ~10 requests a minute and we have hit it. Degrading to
