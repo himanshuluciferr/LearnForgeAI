@@ -11,8 +11,14 @@ It also answers the subject confirmation itself, since a real run now stops to a
 import asyncio
 import sys
 import time
+from pathlib import Path
 
 import httpx
+
+# Run as `python scripts/e2e_smoke.py`, which puts scripts/ on the path rather than the root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from backend.agents.chapter import CHARS_PER_SOURCE  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -83,9 +89,30 @@ async def main():
     subject = state["subject"]
     print(
         f"subject={subject['canonical_name']} ({subject['subject_type']}) "
-        f"sources={len(state['sources'])} searches={len(state['subject_trace']['searches'])}",
+        f"identity-docs={len(state['sources'])} "
+        f"searches={len(state['subject_trace']['searches'])} "
+        f"scope={len(subject['scope'])}",
         flush=True,
     )
+
+    # What the chapter writer is actually handed. The first run of this reported node 2's
+    # identity evidence and never showed node 3's, which is the number the rebuild was about.
+    research = state["research"]
+    retrieved = sum(len(source["text"]) for source in research)
+    shown = sum(min(CHARS_PER_SOURCE, len(source["text"])) for source in research)
+    print(f"research: {len(research)} sources, {retrieved:,} chars retrieved", flush=True)
+    for source in research:
+        print(
+            f"  {len(source['text'].split()):>6} words  [{source['kind']}] {source['url']}",
+            flush=True,
+        )
+    if retrieved:
+        print(
+            f"  reaching each chapter prompt: {shown:,} chars "
+            f"({100 * shown / retrieved:.0f}% of what was retrieved, from the top of each page)",
+            flush=True,
+        )
+
     print(
         f"chapters={len(state['chapters'])} practice={len(state['practice'])} "
         f"projects={len(state['projects'])} quizzes={len(state['quizzes'])} "
@@ -107,4 +134,6 @@ async def main():
     print("saved probe_e2e.md", flush=True)
 
 
-asyncio.run(main())
+# Guarded because without it, merely importing this module generates a whole course.
+if __name__ == "__main__":
+    asyncio.run(main())
