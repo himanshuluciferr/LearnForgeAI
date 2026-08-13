@@ -10,6 +10,7 @@ from agent_framework import Agent, Executor, WorkflowContext, handler
 from backend.agents.fanout import per_chapter
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
+from backend.skills.passages.skill import passages_for
 from backend.workflow.state import (
     Chapter,
     ChapterDraft,
@@ -36,8 +37,10 @@ WORDS_PER_SESSION_MINUTE = 25
 MIN_WORDS = 600
 MAX_WORDS = 2000
 
-# Every source goes into every chapter prompt, so this multiplies by the number of chapters.
-CHARS_PER_SOURCE = 4_000
+# Every source rides in every chapter's prompt, so this multiplies by the number of chapters.
+# Held near what the old first-4,000-chars-of-each-source came to, so that the thing being
+# changed is WHICH text the writer sees rather than how much.
+CHARS_PER_CHAPTER = 24_000
 
 
 @lru_cache
@@ -54,19 +57,13 @@ def target_words(daily_minutes: int) -> int:
     return max(MIN_WORDS, min(MAX_WORDS, daily_minutes * WORDS_PER_SESSION_MINUTE))
 
 
-def format_sources(sources: list[ResearchSource]) -> str:
-    """The retrieved text itself, not a description of it.
-
-    This used to hand over a title, a URL and a summary the research model had written about a
-    page it never opened, which meant every chapter was written from model memory with a
-    citation attached.
-    """
+def format_sources(sources: list[ResearchSource], outline: ChapterOutline) -> str:
+    """The parts of each page this chapter needs, not the first few thousand characters of all
+    of them — which for a reference page is its introduction, every time."""
     if not sources:
         return "None."
-    return "\n\n".join(
-        f"[{number}] {source.title} ({source.url})\n{source.text[:CHARS_PER_SOURCE]}"
-        for number, source in enumerate(sources, start=1)
-    )
+    wanted = " ".join([outline.title, *outline.objectives])
+    return passages_for(sources, wanted, CHARS_PER_CHAPTER)
 
 
 def covered_so_far(curriculum: Curriculum, outline: ChapterOutline) -> str:
@@ -128,7 +125,7 @@ def build_prompt(
         f"By the end the learner must be able to:\n{objectives}\n\n"
         f"{covered_so_far(curriculum, outline)}\n\n"
         f"{coming_later(curriculum, outline)}\n\n"
-        f"Sources you may draw on:\n{format_sources(sources)}"
+        f"Sources you may draw on:\n{format_sources(sources, outline)}"
         f"{format_issues(issues or [])}"
     )
 

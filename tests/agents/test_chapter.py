@@ -11,7 +11,7 @@ from backend.agents.chapter import (
     MAX_WORDS,
     MIN_WORDS,
     WORDS_PER_SESSION_MINUTE,
-    CHARS_PER_SOURCE,
+    CHARS_PER_CHAPTER,
     ChapterExecutor,
     assemble,
     build_prompt,
@@ -116,6 +116,10 @@ def make_curriculum(count: int) -> Curriculum:
     )
 
 
+def make_outline(number: int, title: str, *objectives: str) -> ChapterOutline:
+    return ChapterOutline(number=number, title=title, objectives=list(objectives))
+
+
 def use_stub(monkeypatch, agent: StubAgent) -> StubAgent:
     monkeypatch.setattr(chapter_module, "get_chapter_agent", lambda: agent)
     return agent
@@ -218,11 +222,28 @@ def test_the_writer_is_given_the_retrieved_text_not_a_description_of_it():
         )
     ]
 
-    listed = format_sources(sources)
+    listed = format_sources(sources, make_outline(1, "Creating an index"))
 
     assert "Azure AI Search docs" in listed
     assert "https://learn.microsoft.com/azure/search/" in listed
     assert "An index is a persistent store of documents and their fields." in listed
+
+
+def test_the_chapter_gets_the_part_of_the_page_about_its_own_topic():
+    """Measured: the writer used to see the first 4,000 chars of every source, which for a
+    reference page is its introduction — so the chapter on --rebase-merges never saw the
+    --rebase-merges section, although we had fetched it."""
+    filler = "orientation and getting started " * 400
+    source = ResearchSource(
+        title="git-rebase",
+        url="https://git-scm.com/docs/git-rebase",
+        kind=ResourceKind.DOCS,
+        text=f"{filler} rebasing merges preserves topology with rebase-merges",
+    )
+
+    listed = format_sources([source], make_outline(5, "Rebasing merges and topology"))
+
+    assert "rebasing merges preserves topology" in listed
 
 
 def test_a_long_page_is_truncated_before_it_reaches_every_chapter_prompt():
@@ -231,7 +252,9 @@ def test_a_long_page_is_truncated_before_it_reaches_every_chapter_prompt():
         title="t", url="https://x.example/a", kind=ResourceKind.DOCS, text="word " * 20_000
     )
 
-    assert len(format_sources([source])) <= CHARS_PER_SOURCE + 200
+    listed = format_sources([source], make_outline(1, "Anything"))
+
+    assert len(listed) <= CHARS_PER_CHAPTER + 200
 
 
 # --- assembly ----------------------------------------------------------------------

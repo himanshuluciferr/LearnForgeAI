@@ -8,6 +8,7 @@ from backend.agents.research import MAX_SOURCES, gather_sources
 from backend.config.settings import get_settings
 from backend.services.page_fetch import MIN_WORDS
 from backend.workflow.state import (
+    ChapterOutline,
     ExperienceLevel,
     IdentityStatus,
     LearningRequest,
@@ -78,8 +79,16 @@ async def test_sources_arrive_best_first(sources):
     assert scores == sorted(scores, reverse=True)
 
 
-async def test_the_writer_receives_the_retrieved_text(sources):
-    """Follows the text one step further, into the prompt chapter-agent actually sees."""
-    prompt = format_sources(sources)
+async def test_the_writer_receives_text_chosen_for_its_own_chapter(sources):
+    """Follows the text one step further, into the prompt chapter-agent actually sees — and
+    checks it is the part about that chapter, not the top of every page."""
+    outline = ChapterOutline(
+        number=4,
+        title="Skillsets and AI enrichment",
+        objectives=["attach a skillset to an indexer"],
+    )
 
-    assert sources[0].text[:200] in prompt
+    prompt = format_sources(sources, outline)
+
+    assert len(prompt) > 1_000
+    assert "skillset" in prompt.lower()
