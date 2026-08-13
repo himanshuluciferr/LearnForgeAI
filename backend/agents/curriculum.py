@@ -7,6 +7,7 @@ from functools import lru_cache
 
 from agent_framework import Agent, Executor, WorkflowContext, handler
 
+from backend.agents.chapter import CHARS_PER_CHAPTER
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
 from backend.workflow.state import (
@@ -37,15 +38,28 @@ def get_curriculum_agent() -> Agent:
     )
 
 
-def plan_chapter_count(subject: SubjectAnalysis) -> int:
-    """One chapter per area the documents say the subject covers.
+def plan_chapter_count(subject: SubjectAnalysis, sources: list[ResearchSource]) -> int:
+    """One chapter per area the documents cover, but never more chapters than there is text.
 
     This used to divide an `estimated_hours` the model supplied, which was measured swinging
     40/120/40 on one subject across three runs — a 3x difference in course length from noise.
     Counting the areas that were actually found is at least grounded in what was read.
-    ⚠️ The stability of `len(scope)` across runs is not yet measured; the clamp bounds it.
+    ⚠️ `len(scope)` is still unstable: 6/4/5 on three identical git runs.
+
+    The evidence cap comes from a measured failure. A Microsoft Agent Framework run planned 11
+    chapters over 75,073 chars, so every chapter shared the same thin material and the writer
+    invented an API — every symbol present in the sources came out right, every symbol absent
+    came out wrong. `CHARS_PER_CHAPTER` is the writer's own budget, so this is simply how many
+    chapters' worth of distinct text we actually hold.
     """
-    return max(MIN_CHAPTERS, min(MAX_CHAPTERS, len(subject.scope)))
+    afforded = sum(len(source.text) for source in sources) // CHARS_PER_CHAPTER
+    if afforded < len(subject.scope):
+        logger.info(
+            "curriculum-agent: evidence supports %d chapters, scope named %d",
+            afforded,
+            len(subject.scope),
+        )
+    return max(MIN_CHAPTERS, min(MAX_CHAPTERS, len(subject.scope), afforded))
 
 
 def format_sources(sources: list[ResearchSource]) -> str:
@@ -71,7 +85,7 @@ def starting_point(request: LearningRequest) -> str:
 def build_prompt(
     request: LearningRequest, subject: SubjectAnalysis, sources: list[ResearchSource]
 ) -> str:
-    chapters = plan_chapter_count(subject)
+    chapters = plan_chapter_count(subject, sources)
     prerequisites = ", ".join(subject.prerequisites) or "none"
     return (
         f"Skill: {subject.canonical_name or request.skill}\n"

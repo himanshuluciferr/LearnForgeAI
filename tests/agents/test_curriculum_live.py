@@ -62,7 +62,7 @@ async def curriculum():
 
 async def test_chapter_count_follows_the_number_we_asked_for(curriculum):
     # The model is told an exact count; allow a little drift but not a different course.
-    expected = plan_chapter_count(SUBJECT)
+    expected = plan_chapter_count(SUBJECT, SOURCES)
 
     assert abs(len(curriculum.chapters) - expected) <= 2
 

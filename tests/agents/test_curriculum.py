@@ -3,6 +3,7 @@
 import pytest
 
 from backend.agents import curriculum as curriculum_module
+from backend.agents.chapter import CHARS_PER_CHAPTER
 from backend.agents.curriculum import (
     MAX_CHAPTERS,
     MIN_CHAPTERS,
@@ -78,6 +79,19 @@ def make_subject(**overrides) -> SubjectAnalysis:
     )
 
 
+def make_sources(chars: int, count: int = 3) -> list[ResearchSource]:
+    """Chapter count is now capped by retrieved volume, so text length is part of the fixture."""
+    return [
+        ResearchSource(
+            title=f"s{n}",
+            url=f"https://example.com/{n}",
+            kind=ResourceKind.DOCS,
+            text="word " * (chars // count // 5),
+        )
+        for n in range(count)
+    ]
+
+
 def make_curriculum(count: int, start: int = 1) -> Curriculum:
     return Curriculum(
         title="t",
@@ -102,11 +116,30 @@ def make_curriculum(count: int, start: int = 1) -> Curriculum:
 def test_chapter_count_follows_the_areas_that_were_found_and_is_clamped(areas, expected):
     """It used to divide a model-supplied `estimated_hours`, measured swinging 40/120/40 on one
     subject — a 3x difference in course length from noise."""
-    assert plan_chapter_count(make_subject(scope=[f"a{n}" for n in range(areas)])) == expected
+    subject = make_subject(scope=[f"a{n}" for n in range(areas)])
+
+    assert plan_chapter_count(subject, make_sources(chars=40 * CHARS_PER_CHAPTER)) == expected
+
+
+def test_chapter_count_is_capped_by_how_much_text_was_actually_retrieved():
+    """Measured: a Microsoft Agent Framework run planned 11 chapters over 75,073 chars, so every
+    chapter shared the same thin material and the writer invented the API it could not read."""
+    subject = make_subject(scope=[f"a{n}" for n in range(11)])
+
+    plenty = plan_chapter_count(subject, make_sources(chars=11 * CHARS_PER_CHAPTER))
+    thin = plan_chapter_count(subject, make_sources(chars=75_073))
+
+    assert plenty == 11
+    assert thin < plenty
+
+
+def test_the_floor_still_holds_when_there_is_barely_any_evidence():
+    """Fewer chapters than MIN_CHAPTERS is not a course. Empty research already fails upstream."""
+    assert plan_chapter_count(make_subject(), make_sources(chars=10)) == MIN_CHAPTERS
 
 
 def test_prompt_states_the_computed_count_rather_than_asking_for_a_guess():
-    prompt = build_prompt(make_request(), make_subject(), [])
+    prompt = build_prompt(make_request(), make_subject(), make_sources(chars=40 * CHARS_PER_CHAPTER))
 
     assert "Produce exactly 10 chapters." in prompt
 
