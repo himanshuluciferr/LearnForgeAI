@@ -154,7 +154,7 @@ def test_sources_are_listed_for_grounding():
             title="Azure AI Search docs",
             url="https://learn.microsoft.com/azure/search/",
             kind=ResourceKind.DOCS,
-            summary="s",
+            text="s",
         )
     ]
 
@@ -165,11 +165,13 @@ def test_sources_are_listed_for_grounding():
     assert "docs" in listed
 
 
-def test_empty_research_becomes_an_explicit_instruction():
-    listed = format_sources([])
+def test_planning_is_given_titles_rather_than_the_whole_page():
+    """The text goes to the chapter writer, which is where it is actually read."""
+    source = ResearchSource(
+        title="t", url="https://x.example/a", kind=ResourceKind.DOCS, text="secret body text"
+    )
 
-    assert "None were verified" in listed
-    assert listed.strip() != ""
+    assert "secret body text" not in format_sources([source])
 
 
 def test_numbering_is_ours_not_the_models():

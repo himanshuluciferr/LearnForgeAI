@@ -3,8 +3,10 @@
 import pytest
 import pytest_asyncio
 
+from backend.agents.chapter import format_sources
 from backend.agents.research import MAX_SOURCES, gather_sources
 from backend.config.settings import get_settings
+from backend.services.page_fetch import MIN_WORDS
 from backend.workflow.state import (
     ExperienceLevel,
     IdentityStatus,
@@ -48,8 +50,21 @@ async def test_returns_a_usable_number_of_sources(sources):
     assert 1 <= len(sources) <= MAX_SOURCES
 
 
+async def test_every_source_carries_the_text_of_a_page_we_read(sources):
+    """The acceptance criterion for the whole node. Until this held, `summary` was written by
+    the model that proposed the URL, so a chapter's "source" was its own recollection."""
+    assert all(source.text for source in sources)
+    assert all(source.words > MIN_WORDS for source in sources)
+
+
+async def test_the_text_is_the_page_rather_than_its_title(sources):
+    """A landing page yields a couple of hundred words of navigation; a page worth writing
+    from yields real prose."""
+    assert max(source.words for source in sources) > 400
+
+
 async def test_every_surviving_url_is_https_and_real(sources):
-    # verify_sources already fetched each one, so reaching here means they all answered.
+    # Each one was fetched to get its text, so reaching here means they all answered.
     assert all(source.url.startswith("https://") for source in sources)
 
 
@@ -63,5 +78,8 @@ async def test_sources_arrive_best_first(sources):
     assert scores == sorted(scores, reverse=True)
 
 
-async def test_every_source_explains_itself(sources):
-    assert all(source.title and len(source.summary) > 20 for source in sources)
+async def test_the_writer_receives_the_retrieved_text(sources):
+    """Follows the text one step further, into the prompt chapter-agent actually sees."""
+    prompt = format_sources(sources)
+
+    assert sources[0].text[:200] in prompt

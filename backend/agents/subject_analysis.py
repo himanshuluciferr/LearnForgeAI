@@ -18,7 +18,7 @@ from agent_framework import Agent, Executor, WorkflowContext, handler
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
 from backend.services.page_fetch import fetch_documents
-from backend.services.web_search import SearchHit, dedupe, search_web
+from backend.services.web_search import SearchHit, dedupe, pick, search_web
 from backend.workflow.state import (
     CourseState,
     IdentityStatus,
@@ -91,27 +91,6 @@ async def analyse_documents(subject: str, documents: list[SourceDocument]) -> Su
     )
     response = await get_analysis_agent().run(prompt)
     return response.value
-
-
-def pick(hits: list[SearchHit], numbers: list[int], budget: int) -> list[SearchHit]:
-    """Indexes into the list we supplied, never URLs, so a mistyped URL is unrepresentable.
-    Out-of-range numbers are dropped rather than wrapped: a silent modulo would hand back a
-    source the model never chose."""
-    chosen: list[SearchHit] = []
-    for number in numbers:
-        if 1 <= number <= len(hits) and hits[number - 1] not in chosen:
-            chosen.append(hits[number - 1])
-        if len(chosen) >= budget:
-            break
-    return chosen
-
-
-def as_documents(hits: list[SearchHit]) -> list[SourceDocument]:
-    """Search results demoted to thin documents, used only when no page could be read."""
-    return [
-        SourceDocument(title=hit.title, url=hit.url, text=f"{hit.title}. {hit.snippet}".strip())
-        for hit in hits
-    ]
 
 
 def unreadable(subject: str, trace: SubjectTrace) -> SubjectAnalysis:

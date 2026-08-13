@@ -11,6 +11,7 @@ from backend.agents.chapter import (
     MAX_WORDS,
     MIN_WORDS,
     WORDS_PER_SESSION_MINUTE,
+    CHARS_PER_SOURCE,
     ChapterExecutor,
     assemble,
     build_prompt,
@@ -205,13 +206,15 @@ def test_prompt_carries_the_course_language():
     assert "Course language: hi" in prompt
 
 
-def test_sources_reach_the_writer_with_their_summaries():
+def test_the_writer_is_given_the_retrieved_text_not_a_description_of_it():
+    """The regression that matters: this used to hand over a summary the research model wrote
+    about a page it never opened, so every chapter was written from memory with a citation."""
     sources = [
         ResearchSource(
             title="Azure AI Search docs",
             url="https://learn.microsoft.com/azure/search/",
             kind=ResourceKind.DOCS,
-            summary="Official product documentation.",
+            text="An index is a persistent store of documents and their fields.",
         )
     ]
 
@@ -219,13 +222,16 @@ def test_sources_reach_the_writer_with_their_summaries():
 
     assert "Azure AI Search docs" in listed
     assert "https://learn.microsoft.com/azure/search/" in listed
-    assert "Official product documentation." in listed
+    assert "An index is a persistent store of documents and their fields." in listed
 
 
-def test_no_sources_becomes_an_instruction_to_stay_conservative():
-    listed = format_sources([])
+def test_a_long_page_is_truncated_before_it_reaches_every_chapter_prompt():
+    """Each source rides in every chapter's prompt, so its size multiplies by chapter count."""
+    source = ResearchSource(
+        title="t", url="https://x.example/a", kind=ResourceKind.DOCS, text="word " * 20_000
+    )
 
-    assert "None were verified" in listed
+    assert len(format_sources([source])) <= CHARS_PER_SOURCE + 200
 
 
 # --- assembly ----------------------------------------------------------------------

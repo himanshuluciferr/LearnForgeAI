@@ -46,7 +46,7 @@ SOURCES = [
         title="Azure AI Search documentation",
         url="https://learn.microsoft.com/azure/search/",
         kind=ResourceKind.DOCS,
-        summary="Official product documentation.",
+        text="Official product documentation.",
     )
 ]
 

@@ -49,8 +49,10 @@ def plan_chapter_count(subject: SubjectAnalysis) -> int:
 
 
 def format_sources(sources: list[ResearchSource]) -> str:
+    """Titles only. Planning needs to know what ground the sources cover; the text itself goes
+    to the chapter writer, where it is actually read."""
     if not sources:
-        return "None were verified. Plan from general knowledge and keep claims conservative."
+        return "None."
     return "\n".join(f"- [{source.kind}] {source.title} — {source.url}" for source in sources)
 
 

@@ -51,7 +51,7 @@ SOURCES = [
         title="Azure AI Search documentation",
         url="https://learn.microsoft.com/azure/search/",
         kind=ResourceKind.DOCS,
-        summary="Official product documentation covering indexes, indexers and queries.",
+        text="Official product documentation covering indexes, indexers and queries.",
     )
 ]
 

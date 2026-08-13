@@ -355,29 +355,35 @@ class ResourceKind(StrEnum):
 
 
 class ResearchSource(BaseModel):
-    """One reference the chapter writer is allowed to lean on."""
+    """One page the chapter writer reads from.
 
-    title: str = Field(description="Title of the page, as it appears on the page itself.")
-    url: str = Field(
+    Every field is filled in by code from a page we fetched. It used to be filled in by the
+    model that proposed the URL, including a `summary` of a page it had never opened — so a
+    "source" was the model describing its own recollection, and the writer wrote from that.
+    """
+
+    title: str
+    url: str
+    kind: ResourceKind
+    # The point of the whole node. Without this the pipeline is not retrieval-augmented; it is
+    # model memory with a bibliography stapled on.
+    text: str
+    rank_score: float = 0.0
+
+    @property
+    def words(self) -> int:
+        return len(self.text.split())
+
+
+class SourceSelection(BaseModel):
+    """Response schema for research-agent: which numbered results are worth reading."""
+
+    picks: list[int] = Field(
+        default_factory=list,
         description=(
-            "Full https URL you are confident exists. Prefer a stable landing or section "
-            "page over a deep versioned link, which rots. Never guess a path."
-        )
-    )
-    kind: ResourceKind = Field(description="What sort of resource this is.")
-    summary: str = Field(
-        description="One or two sentences: what this source covers and when it helps."
-    )
-    rank_score: float = Field(
-        default=0.0, description="Ignored on input — the ranking step overwrites it."
-    )
-
-
-class ResearchBundle(BaseModel):
-    """Response schema for research-agent. Structured output needs an object at the root."""
-
-    sources: list[ResearchSource] = Field(
-        description="Sources covering the skill from first steps through to advanced use."
+            "Numbers of the results worth reading in full, most useful first. You are choosing "
+            "from the list you were given, so give numbers and never URLs."
+        ),
     )
 
 

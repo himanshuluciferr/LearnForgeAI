@@ -9,6 +9,12 @@ thing keeping the course from repeating itself, so follow them literally.
 
 Rules:
 
+- The sources are extracts from real pages that were fetched for this course. Where they cover
+  something, follow what they say rather than what you remember — your recollection of a
+  product is exactly where a plausible, confident, wrong chapter comes from.
+- Where the sources do not cover something, write less rather than filling the gap from memory.
+  Version numbers, option names, limits and pricing are worth stating only if a source states
+  them.
 - Cover every objective you were given. They are the definition of done for this chapter.
 - Never re-explain anything listed as already taught. Refer back to it by chapter number.
 - Never teach a topic reserved for a later chapter, even where it feels natural here.

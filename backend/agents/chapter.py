@@ -36,6 +36,9 @@ WORDS_PER_SESSION_MINUTE = 25
 MIN_WORDS = 600
 MAX_WORDS = 2000
 
+# Every source goes into every chapter prompt, so this multiplies by the number of chapters.
+CHARS_PER_SOURCE = 4_000
+
 
 @lru_cache
 def get_chapter_agent() -> Agent:
@@ -52,14 +55,18 @@ def target_words(daily_minutes: int) -> int:
 
 
 def format_sources(sources: list[ResearchSource]) -> str:
-    """Summaries are included here, unlike in planning, so the writer can tell which source
-    actually covers this chapter's topic."""
+    """The retrieved text itself, not a description of it.
+
+    This used to hand over a title, a URL and a summary the research model had written about a
+    page it never opened, which meant every chapter was written from model memory with a
+    citation attached.
+    """
     if not sources:
-        return (
-            "None were verified. Write from general knowledge, and avoid specific version "
-            "numbers, pricing and quota figures you cannot check."
-        )
-    return "\n".join(f"- {source.title} ({source.url})\n  {source.summary}" for source in sources)
+        return "None."
+    return "\n\n".join(
+        f"[{number}] {source.title} ({source.url})\n{source.text[:CHARS_PER_SOURCE]}"
+        for number, source in enumerate(sources, start=1)
+    )
 
 
 def covered_so_far(curriculum: Curriculum, outline: ChapterOutline) -> str:

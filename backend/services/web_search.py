@@ -188,6 +188,22 @@ def dedupe(hits: Sequence[SearchHit]) -> list[SearchHit]:
     return out
 
 
+def pick(hits: Sequence[SearchHit], numbers: Sequence[int], budget: int) -> list[SearchHit]:
+    """Indexes into the list we supplied, never URLs, so a mistyped URL is unrepresentable.
+
+    Out-of-range numbers are dropped rather than wrapped: a silent modulo would hand back a
+    source the model never chose. Shared by both nodes that select sources, so the rule cannot
+    drift into two versions.
+    """
+    chosen: list[SearchHit] = []
+    for number in numbers:
+        if 1 <= number <= len(hits) and hits[number - 1] not in chosen:
+            chosen.append(hits[number - 1])
+        if len(chosen) >= budget:
+            break
+    return chosen
+
+
 async def search_web(query: str, domains: Sequence[str] | None = None) -> list[SearchHit]:
     if not domains:
         return await search_generic(query)
