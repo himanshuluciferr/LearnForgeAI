@@ -10,6 +10,10 @@ __pycache__/
 generated_courses/*
 !generated_courses/.gitkeep
 
+# Output of scripts/e2e_smoke.py: a whole generated course and the run log.
+probe_e2e.md
+run*.txt
+
 .vscode/
 .idea/
 .DS_Store
