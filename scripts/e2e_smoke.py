@@ -30,6 +30,7 @@ from backend.agents.practice import WORDS_PER_SOLUTION  # noqa: E402
 from backend.models.course import StoredCourse  # noqa: E402
 from backend.skills.exporter.skill import render_course  # noqa: E402
 from backend.skills.passages.skill import head_of, passages_for, render, terms  # noqa: E402
+from backend.workflow.state import MAX_REVISIONS  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -219,7 +220,10 @@ def report_agents(state) -> None:
     written = state.chapters[0] if state.chapters else None
     if written:
         print("\n[6] review-agent — one call per chapter plus a syllabus pass", flush=True)
-        show("INPUT: chapter 1", review_agent.build_chapter_prompt(request, written))
+        show(
+            "INPUT: chapter 1",
+            review_agent.build_chapter_prompt(request, written, state.research),
+        )
         if state.review:
             show("OUTPUT: ReviewResult", state.review.model_dump_json(indent=2))
 
@@ -313,6 +317,25 @@ def report_composition(state) -> None:
         )
 
 
+def report_grounding(state) -> None:
+    """What the reviewer refused to take on trust, and what that cost in rewrites."""
+    if state.review is None:
+        return
+    issues = [
+        issue
+        for chapter_issues in state.review.chapter_issues.values()
+        for issue in chapter_issues
+    ]
+    unsupported = [issue for issue in issues if issue.startswith("Not supported by the sources:")]
+    print("\n--- grounding ---", flush=True)
+    print(f"  revisions taken      {state.revision_count} of {MAX_REVISIONS}", flush=True)
+    print(f"  chapters rewritten   {len(state.review.regenerate_chapters)}"
+          f" of {len(state.chapters)}", flush=True)
+    print(f"  unsupported claims   {len(unsupported)} of {len(issues)} issues", flush=True)
+    for issue in unsupported[:8]:
+        print(f"    {issue[:150]}", flush=True)
+
+
 async def main():
     prompt = " ".join(sys.argv[1:]) or DEFAULT_PROMPT
     print(f"prompt: {prompt}", flush=True)
@@ -359,6 +382,7 @@ async def main():
     report_evidence(state)
     report_selection(state)
     report_composition(state)
+    report_grounding(state)
     report_agents(state)
 
     print(
