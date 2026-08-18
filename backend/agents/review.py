@@ -22,6 +22,7 @@ from backend.workflow.state import (
     LearningRequest,
     ResearchSource,
     ReviewResult,
+    ReviewRound,
     WorkflowStep,
 )
 
@@ -159,19 +160,21 @@ def build_result(
     course: CourseVerdict, numbered: list[tuple[int, ChapterVerdict]]
 ) -> ReviewResult:
     verdicts = [verdict for _, verdict in numbered]
-    # Keyed off the faults themselves rather than the score, so a chapter that teaches an
-    # invented API is rewritten even when it teaches it well.
-    weak = [
-        number
-        for number, verdict in numbered
-        if verdict.score < PASSING_REVIEW_SCORE or verdict.unsupported_claims
-    ]
+    # Claims are reported but do not trigger a rewrite. Rewriting on them cost 37% more wall
+    # clock and still ended at the revision cap with every chapter flagged: the writer invents
+    # because the sources are thin, and another draft off the same sources cannot fix that.
+    weak = [number for number, verdict in numbered if verdict.score < PASSING_REVIEW_SCORE]
     return ReviewResult(
         score=overall_score(verdicts),
         issues=collect_issues(course, numbered),
         regenerate_chapters=weak,
         chapter_issues={
             number: faults(verdict) for number, verdict in numbered if faults(verdict)
+        },
+        unsupported_claims={
+            number: verdict.unsupported_claims
+            for number, verdict in numbered
+            if verdict.unsupported_claims
         },
     )
 
@@ -215,6 +218,13 @@ class ReviewExecutor(Executor):
         assert state.request is not None and state.curriculum is not None
         state.review = await review_course(
             state.request, state.curriculum, state.chapters, state.research
+        )
+        state.review_rounds.append(
+            ReviewRound(
+                score=state.review.score,
+                unsupported=sum(len(c) for c in state.review.unsupported_claims.values()),
+                rewriting=state.review.regenerate_chapters,
+            )
         )
         state.mark(WorkflowStep.REVIEW)
         await ctx.send_message(state)

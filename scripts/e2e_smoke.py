@@ -318,22 +318,21 @@ def report_composition(state) -> None:
 
 
 def report_grounding(state) -> None:
-    """What the reviewer refused to take on trust, and what that cost in rewrites."""
+    """What the reviewer refused to take on trust, and whether rewriting moved it."""
     if state.review is None:
         return
-    issues = [
-        issue
-        for chapter_issues in state.review.chapter_issues.values()
-        for issue in chapter_issues
+    claims = [
+        claim for chapter in state.review.unsupported_claims.values() for claim in chapter
     ]
-    unsupported = [issue for issue in issues if issue.startswith("Not supported by the sources:")]
     print("\n--- grounding ---", flush=True)
     print(f"  revisions taken      {state.revision_count} of {MAX_REVISIONS}", flush=True)
-    print(f"  chapters rewritten   {len(state.review.regenerate_chapters)}"
-          f" of {len(state.chapters)}", flush=True)
-    print(f"  unsupported claims   {len(unsupported)} of {len(issues)} issues", flush=True)
-    for issue in unsupported[:8]:
-        print(f"    {issue[:150]}", flush=True)
+    for index, round_ in enumerate(state.review_rounds, start=1):
+        print(f"  pass {index}: score {round_.score}, {round_.unsupported} unsupported claims, "
+              f"rewriting {round_.rewriting or 'nothing'}", flush=True)
+    print(f"  claims left          {len(claims)} across "
+          f"{len(state.review.unsupported_claims)} of {len(state.chapters)} chapters", flush=True)
+    for claim in claims[:8]:
+        print(f"    {claim[:150]}", flush=True)
 
 
 async def main():

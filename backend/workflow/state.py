@@ -895,6 +895,18 @@ class ReviewResult(BaseModel):
 
     # Keyed by chapter number, so a rewrite can be told what was wrong with its last draft.
     chapter_issues: dict[int, list[str]] = Field(default_factory=dict)
+    # Held apart from chapter_issues, which flattens every fault into prose for the rewrite.
+    # Counting these must not mean matching a sentence we wrote ourselves.
+    unsupported_claims: dict[int, list[str]] = Field(default_factory=dict)
+
+
+class ReviewRound(BaseModel):
+    """One pass of the reviewer. Only the last result survives on the state, and whether a
+    rewrite helped can only be seen by comparing a pass with the one before it."""
+
+    score: int
+    unsupported: int
+    rewriting: list[int] = Field(default_factory=list)
 
 
 class PublishedCourse(BaseModel):
@@ -957,6 +969,7 @@ class CourseState(BaseModel):
     projects: list[Project] = Field(default_factory=list)
     quizzes: list[Quiz] = Field(default_factory=list)
     review: ReviewResult | None = None
+    review_rounds: list[ReviewRound] = Field(default_factory=list)
     published: PublishedCourse | None = None
 
     completed_steps: list[WorkflowStep] = Field(default_factory=list)

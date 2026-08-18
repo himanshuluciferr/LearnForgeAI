@@ -202,29 +202,49 @@ def grounded(score: int, claims: list[str] | None = None) -> ChapterVerdict:
     return ChapterVerdict(score=score, issues=[], unsupported_claims=claims or [])
 
 
-def test_a_well_taught_chapter_is_still_rewritten_when_it_invents_an_api():
-    """The failure this exists to catch: a fabricated method explained beautifully. A course
-    that taught `agent_framework.workflows`, which does not exist, scored 82."""
+def test_a_well_taught_chapter_is_not_rewritten_for_inventing_an_api():
+    """Rewriting on claims was measured: it cost 37% more wall clock and still ended at the
+    revision cap with every chapter flagged. The writer invents when the sources are thin, and
+    another draft off the same sources cannot supply what they never had."""
     numbered = [(1, grounded(95, ["from agent_framework.workflows import Workflow"]))]
+
+    assert build_result(CourseVerdict(issues=[]), numbered).regenerate_chapters == []
+
+
+def test_the_claims_are_still_reported_against_their_chapter():
+    """Not triggering a rewrite is not the same as not noticing."""
+    numbered = [(1, grounded(95, ["invented"])), (2, grounded(95))]
 
     result = build_result(CourseVerdict(issues=[]), numbered)
 
-    assert result.regenerate_chapters == [1]
+    assert result.unsupported_claims == {1: ["invented"]}
+
+
+def test_counting_claims_does_not_mean_matching_a_sentence_we_wrote():
+    """chapter_issues flattens faults into prose for the rewrite; a tally read back out of that
+    prose would break the moment the wording changed."""
+    numbered = [(1, ChapterVerdict(score=95, issues=["vague"], unsupported_claims=["a", "b"]))]
+
+    result = build_result(CourseVerdict(issues=[]), numbered)
+
+    assert sum(len(c) for c in result.unsupported_claims.values()) == 2
 
 
 def test_a_sound_grounded_chapter_is_left_alone():
     numbered = [(1, grounded(PASSING_REVIEW_SCORE))]
 
-    assert build_result(CourseVerdict(issues=[]), numbered).regenerate_chapters == []
+    result = build_result(CourseVerdict(issues=[]), numbered)
+
+    assert result.regenerate_chapters == [] and result.unsupported_claims == {}
 
 
 def test_the_claim_reaches_the_rewrite_so_it_is_not_written_again():
-    """Without it the rewrite is a fresh sample of the same prompt and invents the same API."""
-    numbered = [(1, grounded(95, ["ctx.request_info() pauses the run"]))]
+    """A chapter rewritten for a low score must not reinvent what the last draft invented."""
+    numbered = [(1, ChapterVerdict(score=40, issues=[], unsupported_claims=["ctx.request_info()"]))]
 
     issues = build_result(CourseVerdict(issues=[]), numbered).chapter_issues[1]
 
-    assert any("ctx.request_info() pauses the run" in issue for issue in issues)
+    assert any("ctx.request_info()" in issue for issue in issues)
     assert any(issue.startswith("Not supported by the sources:") for issue in issues)
 
 

@@ -509,8 +509,9 @@ returns `ReviewResult`:
 class ReviewResult(BaseModel):
     score: int
     issues: list[str]
-    regenerate_chapters: list[int]        # which chapters to rewrite
-    chapter_issues: dict[int, list[str]]  # why, so the rewrite can act on it
+    regenerate_chapters: list[int]            # which chapters to rewrite
+    chapter_issues: dict[int, list[str]]      # why, so the rewrite can act on it
+    unsupported_claims: dict[int, list[str]]  # what the sources never showed
 ```
 
 **N+1 calls, not one giant prompt.** A twelve-chapter course is far more prose than one
@@ -520,6 +521,19 @@ looks at the whole syllabus. That call is the only place cross-chapter faults ca
 
 **The two calls are different agents** because they need different `response_format`s:
 `ChapterVerdict` (score + issues) and `CourseVerdict` (issues only).
+
+**The chapter pass is shown the sources.** Judging prose against nothing but itself can only
+ask whether it reads well, so a fabricated method explained clearly scored 82: a course once
+taught `from agent_framework.workflows import Workflow`, which appears in no source. The
+reviewer now gets the same passages the writer had, selected the same way, so a claim counts
+as unsupported only when the writer could not have supported it either.
+
+**Claims are reported, not acted on.** Rewriting a chapter because it invented something was
+tried and measured: 37% more wall clock, and the run still ended at the revision cap with
+every chapter flagged. The writer invents when the sources are thin, and another draft off
+the same sources cannot supply what they never had — the fix belongs in retrieval, not here.
+The claims still ride along in `chapter_issues`, so a chapter rewritten for a low score does
+not reinvent what its last draft invented.
 
 **Nothing is asked for that we already know or can compute.** `ChapterVerdict` has no
 `number` field — we know which chapter we sent. `score` for the course is the mean of the
@@ -737,6 +751,7 @@ class CourseState(BaseModel):
     projects: list[Project]                      # agent 7
     quizzes: list[Quiz]                          # agent 8
     review: ReviewResult | None                  # agent 9
+    review_rounds: list[ReviewRound]             # one entry per review pass
     published: PublishedCourse | None            # publisher
 
     completed_steps: list[WorkflowStep]          # drives percent
@@ -747,8 +762,13 @@ Two helpers carry real logic:
 
 - `mark(step)` — records a finished step, **ignoring duplicates**. The review loop revisits
   `chapter`, so without this guard progress would creep past 100%.
-- `should_regenerate` — `review.score < 90 and revision_count < 2`. The loop condition,
-  expressed once, in the state rather than scattered across edges.
+- `should_regenerate` — `bool(review.regenerate_chapters) and revision_count < MAX_REVISIONS`.
+  The loop condition, expressed once, in the state rather than scattered across edges. It
+  keys off the work to be done rather than the score, so the decision to loop and the work
+  that loop would do cannot disagree.
+
+`review_rounds` exists because only the last `ReviewResult` survives on the state, and
+whether a rewrite helped can only be seen by comparing a pass with the one before it.
 
 ---
 
