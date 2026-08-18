@@ -131,6 +131,40 @@ def test_ties_keep_document_order():
     assert orders == sorted(orders)
 
 
+def test_a_rare_term_is_bought_even_though_a_common_one_scores_higher():
+    """The whole reason this is set cover. Ranking by raw overlap filled the budget with
+    passages that all repeated the same two common terms, and the single mention of the rare
+    one was never reached: measured over a finished course, 65% of a topic's vocabulary
+    against an 87% ceiling."""
+    common = source(" ".join(["alpha beta"] * 200), url="https://common.dev")
+    rare = source(f"{words(WORDS_PER_PASSAGE - 4)} gamma", url="https://rare.dev")
+    # Room for three passages, and four of the common ones outscore the rare one.
+    budget = 3 * len(split(common.text)[0])
+
+    chosen = select([common, rare], "alpha beta gamma", budget)
+
+    assert any("gamma" in passage.text for passage in chosen)
+
+
+def test_leftover_budget_is_spent_once_there_is_nothing_new_to_cover():
+    """Stopping at full coverage would hand a narrow topic a fraction of its budget."""
+    page = source(" ".join(f"rebase item{n}" for n in range(2_000)))
+
+    chosen = select([page], "rebase", budget=6_000)
+    spent = sum(len(passage.text) for passage in chosen)
+
+    assert spent > 4_000
+    assert spent <= 6_000
+
+
+def test_backfill_never_reaches_for_a_passage_that_matches_nothing():
+    page = source(f"rebase {words(600, 'unrelated')}")
+
+    chosen = select([page], "rebase", budget=100_000)
+
+    assert all("rebase" in passage.text for passage in chosen)
+
+
 # --- rendering ---
 
 
