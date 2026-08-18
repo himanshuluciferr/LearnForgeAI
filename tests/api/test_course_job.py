@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from backend.api import course as course_api
 from backend.main import app
+from backend.models.course import StoredCourse
 from backend.models.job import GenerationJob, JobStatus
 from backend.schemas.course import CourseRequest
 from backend.services.course_store import FileCourseStore
@@ -39,17 +40,76 @@ def test_create_course_returns_job_and_progress_is_pollable():
     assert response.status_code == 202
     job_id = response.json()["job_id"]
 
-    progress = client.get(f"/courses/{job_id}/progress")
+    progress = client.get(f"/courses/{job_id}/progress", params={"user_id": "priya@contoso.com"})
     assert progress.status_code == 200
     assert progress.json()["job_id"] == job_id
 
 
+def test_the_status_url_handed_back_is_one_that_works():
+    """The caller polls the url we give it, so it has to carry the id the read now requires."""
+    response = client.post(
+        "/courses",
+        json={"user_id": "priya@contoso.com", "prompt": "Teach me Azure AI Search"},
+    )
+
+    assert client.get(response.json()["status_url"]).status_code == 200
+
+
 def test_progress_404_for_unknown_job():
-    assert client.get("/courses/does-not-exist/progress").status_code == 404
+    assert (
+        client.get("/courses/does-not-exist/progress", params={"user_id": "priya"}).status_code
+        == 404
+    )
 
 
 def test_course_404_for_unknown_course():
-    assert client.get(f"/courses/{uuid4()}").status_code == 404
+    assert client.get(f"/courses/{uuid4()}", params={"user_id": "priya"}).status_code == 404
+
+
+# --- a course belongs to the learner who asked for it -------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/courses/{id}", "/courses/{id}/progress"],
+)
+def test_a_read_without_a_learner_is_refused(path):
+    """user_id both routes to the partition and authorises. Left optional, the stores fall back
+    to a cross-partition query and hand any course to anyone holding its id."""
+    assert client.get(path.format(id=uuid4())).status_code == 422
+
+
+def test_confirming_someone_elses_job_is_refused():
+    job_id = client.post(
+        "/courses",
+        json={"user_id": "priya@contoso.com", "prompt": "Teach me Azure AI Search"},
+    ).json()["job_id"]
+
+    stolen = client.post(f"/courses/{job_id}/confirm", params={"user_id": "mallory@contoso.com"})
+
+    # Not 403: telling Mallory the job exists is itself the leak.
+    assert stolen.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reading_someone_elses_course_is_not_found(monkeypatch, tmp_path):
+    store = FileCourseStore(tmp_path)
+    monkeypatch.setattr(course_api, "course_store", store)
+    course_id = str(uuid4())
+    await store.save(
+        StoredCourse(
+            id=course_id,
+            user_id="priya@contoso.com",
+            job_id="j1",
+            state=CourseState(job_id="j1", user_id="priya@contoso.com", prompt="p"),
+        )
+    )
+
+    mine = client.get(f"/courses/{course_id}", params={"user_id": "priya@contoso.com"})
+    theirs = client.get(f"/courses/{course_id}", params={"user_id": "mallory@contoso.com"})
+
+    assert mine.status_code == 200
+    assert theirs.status_code == 404
 
 
 @pytest.mark.asyncio
