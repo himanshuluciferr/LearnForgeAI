@@ -8,6 +8,10 @@ from typing import Protocol
 from backend.models.quiz import QuizAttempt
 from backend.services.cosmos import QUIZ_RESULTS, cosmos_enabled, get_container, to_document
 
+# Cosmos refuses to ORDER BY a path its index policy excludes, and quiz_results shares the jobs
+# policy. Named so a test can check the policy still covers it.
+ORDER_FIELD = "created_at"
+
 
 class QuizStore(Protocol):
     async def save(self, attempt: QuizAttempt) -> QuizAttempt: ...
@@ -46,7 +50,7 @@ class CosmosQuizStore:
         found = [
             item
             async for item in container.query_items(
-                "SELECT * FROM c WHERE c.course_id = @course ORDER BY c.taken_at DESC",
+                f"SELECT * FROM c WHERE c.course_id = @course ORDER BY c.{ORDER_FIELD} DESC",
                 parameters=[{"name": "@course", "value": course_id}],
                 partition_key=user_id,
             )

@@ -25,4 +25,7 @@ class QuizAttempt(BaseModel):
     total: int
     percent: int
     answers: list[MarkedAnswer] = Field(default_factory=list)
-    taken_at: datetime = Field(default_factory=_now)
+    # `created_at` rather than `taken_at`: quiz_results shares the jobs index policy, which
+    # indexes created_at and excludes everything else, and Cosmos refuses to order by a path
+    # its policy excludes.
+    created_at: datetime = Field(default_factory=_now)
