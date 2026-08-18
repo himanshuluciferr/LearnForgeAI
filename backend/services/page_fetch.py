@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 MAX_HTML_CHARS = 400_000
 MAX_TEXT_CHARS = 40_000
 # Below this a page is nav furniture rather than content — a landing page yielded 136 words.
-MIN_WORDS = 50
+# A page shorter than this is a landing page or an index, not a source, and it costs a slot a
+# real page could use. Measured on run 8: the fetched pages were 230/255 words or 693+.
+MIN_WORDS = 300
 TIMEOUT_SECONDS = 25.0
 
 BLOCKED_SUFFIXES = ("localhost", ".internal", ".local")

@@ -72,14 +72,14 @@ def test_entities_and_runs_of_whitespace_collapse():
 
 @pytest.mark.asyncio
 async def test_a_page_is_read_and_kept_as_text(monkeypatch):
-    body = "<p>" + " ".join(["word"] * 200) + "</p>"
+    body = "<p>" + " ".join(["word"] * (MIN_WORDS * 2)) + "</p>"
     monkeypatch.setattr(
         page_fetch.httpx, "AsyncClient", transport(lambda r: httpx.Response(200, text=body))
     )
 
     documents = await fetch_documents([hit("https://x.example/a")], limit=5)
 
-    assert len(documents) == 1 and documents[0].words == 200
+    assert len(documents) == 1 and documents[0].words == MIN_WORDS * 2
 
 
 @pytest.mark.asyncio
@@ -159,7 +159,7 @@ async def test_a_github_folder_is_read_as_code_not_as_a_list_of_file_names(monke
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.github.com":
             return httpx.Response(200, json=LISTING)
-        return httpx.Response(200, text="from agent_framework import Agent\n" * 60)
+        return httpx.Response(200, text="from agent_framework import Agent\n" * 200)
 
     monkeypatch.setattr(page_fetch.httpx, "AsyncClient", transport(handler))
 
@@ -217,7 +217,7 @@ async def test_a_github_file_is_read_raw_rather_than_stripped_of_its_syntax(monk
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "raw.githubusercontent.com"
-        return httpx.Response(200, text=code * 20)
+        return httpx.Response(200, text=code * 100)
 
     monkeypatch.setattr(page_fetch.httpx, "AsyncClient", transport(handler))
 

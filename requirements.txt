@@ -10,6 +10,10 @@ python-multipart
 # pulls in Bedrock/Gemini/Anthropic/Ollama clients we never use.
 agent-framework-core>=1.13.0
 agent-framework-foundry>=1.10.4
+# Required by MCPStreamableHTTPTool, which reads the Microsoft Learn docs server.
+# Pinned below 2: agent-framework 1.13 reads `initialize_result.protocolVersion`, which
+# mcp 2.0.0 renamed to `protocol_version`, so connecting raises AttributeError.
+mcp>=1.29,<2
 
 # --- Azure ---
 openai

@@ -61,3 +61,6 @@ THE REST OF THE MESSAGE
   Leave it null if they did not say.
 - Leave `daily_minutes` null unless they stated a time commitment.
 - `language` is the language the course should be written in, defaulting to English.
+- Leave `programming_language` null unless the message names one, as in "in Python" or "using
+  C#". Do not infer it from the subject: most frameworks support several, and the default is
+  applied later where the learner can see it.
