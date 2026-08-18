@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.models.job import JobStatus
 from backend.workflow.state import WorkflowStep
@@ -14,6 +14,14 @@ class CourseRequest(BaseModel):
     user_id: str
     prompt: str = Field(min_length=3, max_length=2000)
     language: str = "en"
+
+
+class ChoiceRequest(BaseModel):
+    """The option selected in response to a needs-choice job."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    choice: str = Field(min_length=1)
 
 
 class JobAccepted(BaseModel):

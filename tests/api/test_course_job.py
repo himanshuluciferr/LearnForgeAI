@@ -144,6 +144,58 @@ async def test_the_options_reach_the_caller_as_a_list(monkeypatch):
     assert progress["detail"] == "React or Vue?"
 
 
+@pytest.mark.asyncio
+async def test_selecting_an_offered_choice_restarts_the_full_run():
+    job_id = str(uuid4())
+    await job_store.create(
+        GenerationJob(
+            id=job_id,
+            user_id="u1",
+            prompt="Teach me React or Vue, 20 minutes a day",
+            status=JobStatus.NEEDS_CHOICE,
+            options=["React", "Vue"],
+        )
+    )
+    resumed: list[tuple[CourseRequest, CourseState | None]] = []
+
+    async def capture(job: str, request: CourseRequest, state=None) -> None:
+        resumed.append((request, state))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(course_api, "run_generation", capture)
+        response = client.post(
+            f"/courses/{job_id}/confirm?user_id=u1", json={"choice": "React"}
+        )
+
+    assert response.status_code == 202
+    assert len(resumed) == 1
+    assert resumed[0][1] is None
+    assert "20 minutes a day" in resumed[0][0].prompt
+    assert resumed[0][0].prompt.endswith("The learner selected this subject: React")
+
+
+@pytest.mark.asyncio
+async def test_a_choice_must_be_supplied_and_must_be_one_of_the_options():
+    job_id = str(uuid4())
+    await job_store.create(
+        GenerationJob(
+            id=job_id,
+            user_id="u1",
+            prompt="Teach me React or Vue",
+            status=JobStatus.NEEDS_CHOICE,
+            options=["React", "Vue"],
+        )
+    )
+
+    missing = client.post(f"/courses/{job_id}/confirm?user_id=u1")
+    unknown = client.post(
+        f"/courses/{job_id}/confirm?user_id=u1", json={"choice": "Angular"}
+    )
+
+    assert missing.status_code == 422
+    assert unknown.status_code == 422
+
+
 # --- the confirmation gate ---
 
 

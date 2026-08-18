@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
 from backend.models.course import StoredCourse
 from backend.models.job import GenerationJob, JobStatus
-from backend.schemas.course import CourseRequest, JobAccepted, JobProgress
+from backend.schemas.course import ChoiceRequest, CourseRequest, JobAccepted, JobProgress
 from backend.services.course_store import course_store
 from backend.services.job_store import job_store
 from backend.workflow.runner import run_generation
@@ -33,12 +33,36 @@ async def create_course(request: CourseRequest, tasks: BackgroundTasks) -> JobAc
 
 @router.post("/{job_id}/confirm", status_code=status.HTTP_202_ACCEPTED)
 async def confirm_subject(
-    job_id: str, tasks: BackgroundTasks, user_id: str | None = None
+    job_id: str,
+    tasks: BackgroundTasks,
+    selection: ChoiceRequest | None = None,
+    user_id: str | None = None,
 ) -> JobAccepted:
-    """Approves the identified subject and starts the expensive half of the run."""
+    """Answers a clarification or approves the identified subject."""
     job = await job_store.get(job_id, user_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    if job.status is JobStatus.NEEDS_CHOICE:
+        if selection is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A choice is required for a needs-choice job",
+            )
+        if selection.choice not in job.options:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Choice must be one of the job options",
+            )
+        prompt = f"{job.prompt}\n\nThe learner selected this subject: {selection.choice}"
+        request = CourseRequest(user_id=job.user_id, prompt=prompt)
+        tasks.add_task(run_generation, job_id, request)
+        return JobAccepted(
+            job_id=job.id,
+            status=JobStatus.RUNNING,
+            status_url=f"/courses/{job.id}/progress?user_id={quote(job.user_id)}",
+        )
+
     if job.status is not JobStatus.NEEDS_CONFIRMATION:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
