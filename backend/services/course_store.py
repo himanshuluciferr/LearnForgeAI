@@ -18,6 +18,10 @@ from backend.services.cosmos import COURSES, cosmos_enabled, get_container, to_d
 
 COURSES_DIR = Path(__file__).resolve().parents[2] / "generated_courses"
 
+# Cosmos refuses to ORDER BY a path its index policy excludes. Named so a test can check the
+# policy still covers it; the courses container also has a composite index on (user_id, this).
+ORDER_FIELD = "created_at"
+
 
 def _is_safe_id(course_id: str) -> bool:
     """Ids arrive from the URL, so anything but a UUID could escape the courses directory."""
@@ -118,7 +122,7 @@ class CosmosCourseStore:
         found = [
             item
             async for item in container.query_items(
-                "SELECT * FROM c ORDER BY c.created_at DESC OFFSET 0 LIMIT @limit",
+                f"SELECT * FROM c ORDER BY c.{ORDER_FIELD} DESC OFFSET 0 LIMIT @limit",
                 parameters=[{"name": "@limit", "value": limit}],
                 partition_key=user_id,
             )

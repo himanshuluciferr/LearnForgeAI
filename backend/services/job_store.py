@@ -16,6 +16,10 @@ from backend.models.job import GenerationJob, JobStatus
 from backend.services.cosmos import JOBS, cosmos_enabled, get_container, to_document
 from backend.workflow.state import WorkflowStep
 
+# Cosmos refuses to ORDER BY a path its index policy excludes, and the jobs container indexes
+# only user_id, status and created_at. Named so a test can check the policy still covers it.
+ORDER_FIELD = "created_at"
+
 
 def _apply(job: GenerationJob, updates: dict[str, Any]) -> GenerationJob:
     for field, value in updates.items():
@@ -74,7 +78,7 @@ class InMemoryJobStore:
     async def for_user(self, user_id: str, limit: int = 5) -> list[GenerationJob]:
         async with self._lock:
             mine = [job for job in self._jobs.values() if job.user_id == user_id]
-        mine.sort(key=lambda job: job.updated_at, reverse=True)
+        mine.sort(key=lambda job: getattr(job, ORDER_FIELD), reverse=True)
         return mine[:limit]
 
     async def update(
@@ -148,7 +152,7 @@ class CosmosJobStore:
         found = [
             item
             async for item in get_container(JOBS).query_items(
-                "SELECT * FROM c ORDER BY c.updated_at DESC OFFSET 0 LIMIT @limit",
+                f"SELECT * FROM c ORDER BY c.{ORDER_FIELD} DESC OFFSET 0 LIMIT @limit",
                 parameters=[{"name": "@limit", "value": limit}],
                 partition_key=user_id,
             )
