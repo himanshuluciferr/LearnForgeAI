@@ -7,9 +7,11 @@ from functools import lru_cache
 
 from agent_framework import Agent, Executor, WorkflowContext, handler
 
+from backend.agents.chapter import CHARS_PER_TOPIC
 from backend.agents.fanout import per_chapter
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
+from backend.skills.passages.skill import passages_for
 from backend.workflow.state import (
     PASSING_REVIEW_SCORE,
     Chapter,
@@ -18,6 +20,7 @@ from backend.workflow.state import (
     CourseVerdict,
     Curriculum,
     LearningRequest,
+    ResearchSource,
     ReviewResult,
     WorkflowStep,
 )
@@ -54,7 +57,9 @@ def clamp_score(score: int) -> int:
     return max(0, min(100, score))
 
 
-def build_chapter_prompt(request: LearningRequest, chapter: Chapter) -> str:
+def build_chapter_prompt(
+    request: LearningRequest, chapter: Chapter, sources: list[ResearchSource]
+) -> str:
     takeaways = "\n".join(f"- {point}" for point in chapter.key_points) or "- none stated"
     return (
         f"Skill: {request.skill}\n"
@@ -62,8 +67,19 @@ def build_chapter_prompt(request: LearningRequest, chapter: Chapter) -> str:
         f"Learner's goal: {request.goal or 'not stated'}\n\n"
         f"Chapter {chapter.number}: {chapter.title}\n\n"
         f"The chapter claims these takeaways:\n{takeaways}\n\n"
-        f"---\n{chapter.body_markdown}\n---"
+        f"---\n{chapter.body_markdown}\n---\n\n"
+        f"The sources this chapter was written from:\n{format_sources(chapter, sources)}"
     )
+
+
+def format_sources(chapter: Chapter, sources: list[ResearchSource]) -> str:
+    """The same passages the writer was given, so a claim is only unsupported when the writer
+    could not have supported it either. Showing the reviewer less would report honest work
+    as invention."""
+    if not sources:
+        return "None. Report nothing as unsupported: there was nothing to support it with."
+    query = " ".join([chapter.title] + [topic.title for topic in chapter.topics])
+    return passages_for(sources, query, CHARS_PER_TOPIC * max(1, len(chapter.topics)))
 
 
 def format_outline(curriculum: Curriculum, chapters: list[Chapter]) -> str:
@@ -90,10 +106,18 @@ def build_course_prompt(
     )
 
 
-async def review_chapter(request: LearningRequest, chapter: Chapter) -> ChapterVerdict:
-    response = await get_chapter_review_agent().run(build_chapter_prompt(request, chapter))
+async def review_chapter(
+    request: LearningRequest, chapter: Chapter, sources: list[ResearchSource]
+) -> ChapterVerdict:
+    response = await get_chapter_review_agent().run(
+        build_chapter_prompt(request, chapter, sources)
+    )
     verdict: ChapterVerdict = response.value
-    return ChapterVerdict(score=clamp_score(verdict.score), issues=verdict.issues)
+    return ChapterVerdict(
+        score=clamp_score(verdict.score),
+        issues=verdict.issues,
+        unsupported_claims=verdict.unsupported_claims,
+    )
 
 
 async def review_whole_course(
@@ -123,23 +147,40 @@ def collect_issues(
     return issues
 
 
+def faults(verdict: ChapterVerdict) -> list[str]:
+    """Unsupported claims first: a chapter that teaches something the sources never showed is
+    wrong, which matters more than any gap in how well it teaches."""
+    return [f"Not supported by the sources: {claim}" for claim in verdict.unsupported_claims] + list(
+        verdict.issues
+    )
+
+
 def build_result(
     course: CourseVerdict, numbered: list[tuple[int, ChapterVerdict]]
 ) -> ReviewResult:
     verdicts = [verdict for _, verdict in numbered]
-    weak = [number for number, verdict in numbered if verdict.score < PASSING_REVIEW_SCORE]
+    # Keyed off the faults themselves rather than the score, so a chapter that teaches an
+    # invented API is rewritten even when it teaches it well.
+    weak = [
+        number
+        for number, verdict in numbered
+        if verdict.score < PASSING_REVIEW_SCORE or verdict.unsupported_claims
+    ]
     return ReviewResult(
         score=overall_score(verdicts),
         issues=collect_issues(course, numbered),
         regenerate_chapters=weak,
         chapter_issues={
-            number: verdict.issues for number, verdict in numbered if verdict.issues
+            number: faults(verdict) for number, verdict in numbered if faults(verdict)
         },
     )
 
 
 async def review_course(
-    request: LearningRequest, curriculum: Curriculum, chapters: list[Chapter]
+    request: LearningRequest,
+    curriculum: Curriculum,
+    chapters: list[Chapter],
+    sources: list[ResearchSource] | None = None,
 ) -> ReviewResult:
     """One focused call per chapter, plus one over the outline.
 
@@ -150,7 +191,7 @@ async def review_course(
         raise ValueError("review-agent was given no chapters to review")
 
     async def review_one(chapter: Chapter) -> ChapterVerdict:
-        return await review_chapter(request, chapter)
+        return await review_chapter(request, chapter, sources or [])
 
     verdicts = await per_chapter(AGENT_NAME, chapters, review_one, MAX_CONCURRENT_REVIEWS)
     # per_chapter returns input order, so chapters and verdicts still line up.
@@ -172,6 +213,8 @@ class ReviewExecutor(Executor):
     @handler
     async def run(self, state: CourseState, ctx: WorkflowContext[CourseState]) -> None:
         assert state.request is not None and state.curriculum is not None
-        state.review = await review_course(state.request, state.curriculum, state.chapters)
+        state.review = await review_course(
+            state.request, state.curriculum, state.chapters, state.research
+        )
         state.mark(WorkflowStep.REVIEW)
         await ctx.send_message(state)

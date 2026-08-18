@@ -863,6 +863,15 @@ class ChapterVerdict(BaseModel):
             "chapter is sound — do not invent criticism to appear thorough."
         ),
     )
+    unsupported_claims: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every statement the chapter makes about the subject that the sources do not "
+            "show: an import path, class, method, option, limit or behaviour that appears "
+            "in no source. Quote the claim. Teaching commentary, analogies and general "
+            "explanation are not claims about the subject and belong nowhere near this list."
+        ),
+    )
 
 
 class CourseVerdict(BaseModel):

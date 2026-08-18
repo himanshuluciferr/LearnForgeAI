@@ -97,7 +97,7 @@ def failing_reviews(count: int):
     """A reviewer that rejects the first `count` drafts, then accepts."""
     calls = 0
 
-    async def review_course(request, curriculum, chapters):
+    async def review_course(request, curriculum, chapters, sources=None):
         nonlocal calls
         calls += 1
         if calls <= count:

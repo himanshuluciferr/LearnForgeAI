@@ -27,6 +27,8 @@ from backend.workflow.state import (
     Curriculum,
     ExperienceLevel,
     LearningRequest,
+    ResearchSource,
+    ResourceKind,
     ReviewResult,
     WorkflowStep,
     progress_percent,
@@ -193,13 +195,85 @@ def test_course_issues_come_first_and_chapter_issues_say_which_chapter():
     ]
 
 
+# --- an unsupported claim is a fault whatever the chapter scores --------------------
+
+
+def grounded(score: int, claims: list[str] | None = None) -> ChapterVerdict:
+    return ChapterVerdict(score=score, issues=[], unsupported_claims=claims or [])
+
+
+def test_a_well_taught_chapter_is_still_rewritten_when_it_invents_an_api():
+    """The failure this exists to catch: a fabricated method explained beautifully. A course
+    that taught `agent_framework.workflows`, which does not exist, scored 82."""
+    numbered = [(1, grounded(95, ["from agent_framework.workflows import Workflow"]))]
+
+    result = build_result(CourseVerdict(issues=[]), numbered)
+
+    assert result.regenerate_chapters == [1]
+
+
+def test_a_sound_grounded_chapter_is_left_alone():
+    numbered = [(1, grounded(PASSING_REVIEW_SCORE))]
+
+    assert build_result(CourseVerdict(issues=[]), numbered).regenerate_chapters == []
+
+
+def test_the_claim_reaches_the_rewrite_so_it_is_not_written_again():
+    """Without it the rewrite is a fresh sample of the same prompt and invents the same API."""
+    numbered = [(1, grounded(95, ["ctx.request_info() pauses the run"]))]
+
+    issues = build_result(CourseVerdict(issues=[]), numbered).chapter_issues[1]
+
+    assert any("ctx.request_info() pauses the run" in issue for issue in issues)
+    assert any(issue.startswith("Not supported by the sources:") for issue in issues)
+
+
+def test_unsupported_claims_come_before_teaching_gaps():
+    """A chapter teaching something untrue is wrong; how well it teaches it matters less."""
+    verdict = ChapterVerdict(score=60, issues=["vague example"], unsupported_claims=["invented"])
+
+    issues = build_result(CourseVerdict(issues=[]), [(1, verdict)]).chapter_issues[1]
+
+    assert issues[0].startswith("Not supported by the sources:")
+
+
+def test_the_score_still_reports_teaching_alone():
+    """Truth is carried by the claim list, so grounding must not move the score - the number
+    already swings +/-5 between identical runs."""
+    numbered = [(1, grounded(95, ["invented"])), (2, grounded(95))]
+
+    assert build_result(CourseVerdict(issues=[]), numbered).score == 95
+
+
 # --- what each prompt is allowed to see ---------------------------------------------
 
-
 def test_the_chapter_reviewer_reads_the_actual_prose():
-    prompt = build_chapter_prompt(make_request(), make_chapter(2))
+    prompt = build_chapter_prompt(make_request(), make_chapter(2), [])
 
     assert "Prose belonging to chapter 2." in prompt
+
+
+def test_the_reviewer_is_shown_the_sources_the_chapter_was_written_from():
+    """Without them it can only judge how well the chapter teaches, never whether what it
+    teaches is true - which is how a course of invented API scored 82."""
+    source = ResearchSource(
+        title="Agent Framework",
+        url="https://learn.microsoft.com/agent-framework/",
+        kind=ResourceKind.MICROSOFT_LEARN,
+        text="An agent is built with WorkflowBuilder and an Executor subclass.",
+    )
+
+    prompt = build_chapter_prompt(make_request(), make_chapter(2), [source])
+
+    assert "WorkflowBuilder and an Executor subclass" in prompt
+
+
+def test_with_no_sources_the_reviewer_is_told_not_to_report_anything_unsupported():
+    """Empty research is a failure upstream, but a reviewer left guessing would call an
+    entire honest chapter invented."""
+    prompt = build_chapter_prompt(make_request(), make_chapter(1), [])
+
+    assert "nothing to support it with" in prompt
 
 
 def test_the_course_reviewer_gets_the_shape_not_the_prose():
