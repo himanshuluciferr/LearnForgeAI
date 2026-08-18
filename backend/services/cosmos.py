@@ -18,6 +18,8 @@ from backend.config.settings import get_settings
 
 JOBS = "jobs"
 COURSES = "courses"
+QUIZ_RESULTS = "quiz_results"
+PROGRESS = "progress"
 
 
 def to_document(model: BaseModel) -> dict[str, Any]:
