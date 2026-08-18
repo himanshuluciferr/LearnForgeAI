@@ -798,13 +798,18 @@ class QuizDraft(BaseModel):
         )
     )
     correct_answer: str = Field(
-        description="The right answer, stated in full so it reads correctly on its own."
+        description=(
+            "The right answer as one clause, no longer than the wrong ones and carrying no "
+            "qualification. Any caveat needed to make it strictly true goes in the explanation "
+            "instead: an answer that carries its own caveat is visibly the longest option, and "
+            "measured over four courses a learner who always picks the longest scores 89%."
+        )
     )
     distractors: list[str] = Field(
         description=(
             "Three answers that are wrong but tempting: real mistakes a learner makes here. "
-            "Each must be the same kind of thing and a similar length as the right answer, "
-            "and none may be arguably correct."
+            "Each is the same kind of thing as the right answer and within a few words of its "
+            "length, and none may be arguably correct."
         )
     )
     explanation: str = Field(

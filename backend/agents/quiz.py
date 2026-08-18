@@ -38,6 +38,12 @@ MAX_FINAL_QUESTIONS = 12
 
 # Four options: fewer makes guessing pay, more pads the question with weak distractors.
 MIN_DISTRACTORS = 2
+# The right answer may be the longest — someone has to be — but not by a visible margin.
+# Measured over four courses: a learner who always picked the longest option scored 89%, with
+# the answer a median 1.37x the longest wrong one. Naming the mechanism in the prompt and then
+# in the schema moved that to 55%, and no wording moved it further: length is a quantity, and
+# a quantity is not reliably obeyed. So it is enforced here instead.
+MAX_ANSWER_LENGTH_RATIO = 1.5
 MAX_DISTRACTORS = 3
 
 FINAL_SCOPE = "Final assessment"
@@ -79,6 +85,13 @@ def usable_distractors(draft: QuizDraft) -> list[str]:
     return kept[:MAX_DISTRACTORS]
 
 
+def gives_itself_away(answer: str, distractors: list[str]) -> bool:
+    """True when the answer is so much longer than every wrong option that its length alone
+    identifies it."""
+    longest = max((len(distractor) for distractor in distractors), default=0)
+    return bool(longest) and len(answer) > longest * MAX_ANSWER_LENGTH_RATIO
+
+
 def assemble(draft: QuizDraft) -> QuizQuestion | None:
     """Build the options and locate the answer, rather than trusting an index.
 
@@ -91,6 +104,8 @@ def assemble(draft: QuizDraft) -> QuizQuestion | None:
 
     distractors = usable_distractors(draft)
     if len(distractors) < MIN_DISTRACTORS:
+        return None
+    if gives_itself_away(draft.correct_answer, distractors):
         return None
 
     options = [draft.correct_answer, *distractors]

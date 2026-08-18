@@ -74,10 +74,15 @@ class StubAgent:
 
 
 def make_draft(n: int = 1, distractors: list[str] | None = None) -> QuizDraft:
+    # Options are of a length with each other, or assembly drops the question as a giveaway.
     return QuizDraft(
         question=f"What does thing {n} do?",
         correct_answer=f"right answer {n}",
-        distractors=distractors if distractors is not None else [f"wrong {n}a", f"wrong {n}b"],
+        distractors=(
+            distractors
+            if distractors is not None
+            else [f"wrong answer {n}a", f"wrong answer {n}b"]
+        ),
         explanation=f"because {n}",
     )
 
@@ -127,11 +132,13 @@ def test_the_answer_is_found_in_the_options_we_built():
 
 
 def test_every_option_the_model_wrote_survives_assembly():
-    draft = make_draft(distractors=["wrong a", "wrong b", "wrong c"])
+    draft = make_draft(distractors=["wrong answer a", "wrong answer b", "wrong answer c"])
 
     question = assemble(draft)
 
-    assert sorted(question.options) == sorted(["right answer 1", "wrong a", "wrong b", "wrong c"])
+    assert sorted(question.options) == sorted(
+        ["right answer 1", "wrong answer a", "wrong answer b", "wrong answer c"]
+    )
 
 
 def test_there_is_no_way_to_supply_a_correct_index_to_the_model():
@@ -338,3 +345,44 @@ def test_progress_reaches_seventy_six_percent_once_the_quiz_is_marked():
     ]
 
     assert progress_percent(done) == 76
+
+
+# --- length is the classic giveaway -------------------------------------------------
+
+
+def test_an_answer_far_longer_than_every_wrong_one_is_dropped():
+    """Measured over four courses: a learner who always picked the longest option scored 89%,
+    with the answer a median 1.37x the longest wrong one. The prompt has forbidden this in
+    detail since the first sighting and it came back anyway."""
+    draft = QuizDraft(
+        question="q",
+        correct_answer="a" * 40,
+        distractors=["b" * 10, "c" * 10, "d" * 10],
+        explanation="e",
+    )
+
+    assert assemble(draft) is None
+
+
+def test_being_the_longest_by_a_little_is_allowed():
+    """Someone has to be the longest option. Dropping every such question would empty the quiz
+    and teach nothing about what the learner knows."""
+    draft = QuizDraft(
+        question="q",
+        correct_answer="a" * 11,
+        distractors=["b" * 10, "c" * 10, "d" * 10],
+        explanation="e",
+    )
+
+    assert assemble(draft) is not None
+
+
+def test_a_short_answer_among_long_distractors_is_fine():
+    draft = QuizDraft(
+        question="q",
+        correct_answer="a" * 5,
+        distractors=["b" * 40, "c" * 40, "d" * 40],
+        explanation="e",
+    )
+
+    assert assemble(draft) is not None
