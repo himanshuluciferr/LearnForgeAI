@@ -350,18 +350,30 @@ def test_progress_reaches_seventy_six_percent_once_the_quiz_is_marked():
 # --- length is the classic giveaway -------------------------------------------------
 
 
-def test_an_answer_far_longer_than_every_wrong_one_is_dropped():
-    """Measured over four courses: a learner who always picked the longest option scored 89%,
-    with the answer a median 1.37x the longest wrong one. The prompt has forbidden this in
-    detail since the first sighting and it came back anyway."""
-    draft = QuizDraft(
-        question="q",
+def giveaway(n: int = 1) -> QuizDraft:
+    return QuizDraft(
+        question=f"q{n}",
         correct_answer="a" * 40,
         distractors=["b" * 10, "c" * 10, "d" * 10],
         explanation="e",
     )
 
-    assert assemble(draft) is None
+
+def test_an_answer_far_longer_than_every_wrong_one_is_dropped():
+    """Measured over four courses: a learner who always picked the longest option scored 89%,
+    with the answer a median 1.37x the longest wrong one. The prompt has forbidden this in
+    detail since the first sighting and it came back anyway."""
+    quiz = build_quiz("s", QuizSet(questions=[giveaway(1), make_draft(2)]))
+
+    assert [question.question for question in quiz.questions] == ["What does thing 2 do?"]
+
+
+def test_a_quiz_of_nothing_but_giveaways_is_kept_rather_than_emptied():
+    """Dropping them all raised, and one chapter's quiz failing killed a whole course at 89%.
+    A question that leaks its answer still measures something; no course measures nothing."""
+    quiz = build_quiz("s", QuizSet(questions=[giveaway(1), giveaway(2)]))
+
+    assert len(quiz.questions) == 2
 
 
 def test_being_the_longest_by_a_little_is_allowed():

@@ -85,11 +85,14 @@ def usable_distractors(draft: QuizDraft) -> list[str]:
     return kept[:MAX_DISTRACTORS]
 
 
-def gives_itself_away(answer: str, distractors: list[str]) -> bool:
+def gives_itself_away(question: QuizQuestion) -> bool:
     """True when the answer is so much longer than every wrong option that its length alone
     identifies it."""
-    longest = max((len(distractor) for distractor in distractors), default=0)
-    return bool(longest) and len(answer) > longest * MAX_ANSWER_LENGTH_RATIO
+    longest = max(
+        (len(option) for index, option in enumerate(question.options) if index != question.correct_index),
+        default=0,
+    )
+    return bool(longest) and len(question.options[question.correct_index]) > longest * MAX_ANSWER_LENGTH_RATIO
 
 
 def assemble(draft: QuizDraft) -> QuizQuestion | None:
@@ -105,8 +108,6 @@ def assemble(draft: QuizDraft) -> QuizQuestion | None:
     distractors = usable_distractors(draft)
     if len(distractors) < MIN_DISTRACTORS:
         return None
-    if gives_itself_away(draft.correct_answer, distractors):
-        return None
 
     options = [draft.correct_answer, *distractors]
     random.Random(draft.question).shuffle(options)
@@ -120,15 +121,23 @@ def assemble(draft: QuizDraft) -> QuizQuestion | None:
 
 
 def build_quiz(scope: str, quiz_set: QuizSet, chapter_number: int | None = None) -> Quiz:
-    questions = [question for question in map(assemble, quiz_set.questions) if question]
+    assembled = [question for question in map(assemble, quiz_set.questions) if question]
 
     # A short quiz is degraded; a quiz nobody can take is broken.
-    if not questions:
+    if not assembled:
         raise ValueError(f"quiz-agent returned no usable questions for {scope}")
+
+    # A giveaway is a weak question, not an unusable one, so it is only dropped while something
+    # is left to drop to. Emptying the quiz here failed a whole course at 89% on the run that
+    # found this.
+    sound = [question for question in assembled if not gives_itself_away(question)]
+    questions = sound or assembled
+    if not sound:
+        logger.warning("quiz-agent: every question in %s leaks its answer by length", scope)
 
     dropped = len(quiz_set.questions) - len(questions)
     if dropped:
-        logger.warning("quiz-agent: dropped %d unusable question(s) from %s", dropped, scope)
+        logger.warning("quiz-agent: dropped %d weak question(s) from %s", dropped, scope)
 
     return Quiz(scope=scope, questions=questions, chapter_number=chapter_number)
 
