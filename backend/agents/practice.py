@@ -32,6 +32,13 @@ MAX_CONCURRENT_SETS = 4
 MIN_TASKS = 2
 MAX_TASKS = 4
 
+# chapter-agent's target_words was the only length budget in the pipeline, and it showed.
+# Measured over four stored runs, the worked answers outweighed all the teaching prose
+# combined — 100,610 chars of solutions against 87,436 of chapters on one course, which is
+# most of why a finished document reads as too much to work through.
+WORDS_PER_TASK = 60
+WORDS_PER_SOLUTION = 150
+
 
 @lru_cache
 def get_practice_agent() -> Agent:
@@ -63,7 +70,9 @@ def build_prompt(request: LearningRequest, outline: ChapterOutline, chapter: Cha
         f"Skill: {request.skill}\n"
         f"Learner's level: {request.assumed_level}\n"
         f"Course language: {request.language}\n"
-        f"Produce exactly {plan_task_count(outline.objectives)} tasks.\n\n"
+        f"Produce exactly {plan_task_count(outline.objectives)} tasks.\n"
+        f"Keep each task under {WORDS_PER_TASK} words, and each solution under "
+        f"{WORDS_PER_SOLUTION} words including any code.\n\n"
         f"Chapter {chapter.number}: {chapter.title}\n\n"
         f"Objectives this chapter promised:\n{objectives}\n\n"
         f"Key points:\n{key_points}\n\n"

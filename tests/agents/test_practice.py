@@ -9,6 +9,8 @@ from backend.agents.practice import (
     MAX_CONCURRENT_SETS,
     MAX_TASKS,
     MIN_TASKS,
+    WORDS_PER_SOLUTION,
+    WORDS_PER_TASK,
     PracticeExecutor,
     attach,
     build_prompt,
@@ -200,6 +202,19 @@ def test_prompt_carries_the_course_language():
     prompt = build_prompt(make_request(language="hi"), make_outline(), make_chapter())
 
     assert "Course language: hi" in prompt
+
+
+def test_the_solution_is_given_a_length_budget_like_the_chapter_is():
+    """Measured over four stored runs, the worked answers outweighed every chapter of
+    teaching combined. Nothing bounded them: chapter-agent held the only length budget."""
+    prompt = build_prompt(make_request(), make_outline(), make_chapter())
+
+    assert f"under {WORDS_PER_TASK} words" in prompt
+    assert f"under {WORDS_PER_SOLUTION} words" in prompt
+
+
+def test_a_solution_is_allowed_more_room_than_the_task_that_sets_it():
+    assert WORDS_PER_SOLUTION > WORDS_PER_TASK
 
 
 # --- assembly ----------------------------------------------------------------------

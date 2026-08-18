@@ -21,7 +21,9 @@ Rules:
 - Vary the kinds. A set of four recall tasks is a reading comprehension test, not practice.
 - A `diagnose` task must include the broken input inline — the code, the error, the config.
   The learner cannot debug something they cannot see.
-- The solution explains why, not just what. For code, give the code and one line on the part
-  that people get wrong.
+- The solution is marked against, not read for teaching. The learner has just finished the
+  chapter, so a solution that explains the topic again from the beginning is the single
+  largest reason a finished course becomes too long to work through. Give the answer, then
+  one line on the part people get wrong.
 - Write the tasks and solutions in the requested course language. Leave code, commands and
   product names in their original form.
