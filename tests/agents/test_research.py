@@ -18,6 +18,7 @@ from backend.agents.research import (
     merge,
     plan_queries,
     read_documentation,
+    strip_foreign_code,
     written_for,
 )
 from backend.services.web_search import SearchHit
@@ -398,6 +399,50 @@ def test_merge_keeps_the_searched_sources_first_and_adds_the_rest():
         "https://a.example",
         "https://learn.microsoft.com/b",
     ]
+
+
+# --- foreign code is stripped whatever found the page -------------------------------
+
+
+def test_code_in_another_language_is_removed():
+    """Measured: the durable-task page carries no language label, survives `written_for`,
+    and supplied the one C# example that reached a Python course."""
+    text = "Durable agents persist state.\n\n```csharp\nAIAgent a = c.AsHarnessAgent();\n```\n\nThat is all."
+
+    stripped = strip_foreign_code(text, "python")
+
+    assert "AsHarnessAgent" not in stripped
+    assert "Durable agents persist state." in stripped
+    assert "That is all." in stripped
+
+
+def test_code_in_the_courses_own_language_is_kept():
+    text = "Here:\n\n```python\nagent = Agent(client=client)\n```"
+
+    assert "Agent(client=client)" in strip_foreign_code(text, "python")
+
+
+@pytest.mark.parametrize("tag", ["json", "yaml", "bash", "console", "text"])
+def test_configuration_blocks_belong_to_no_language_and_are_kept(tag):
+    """Dropping these would take the settings a topic needs along with the foreign code."""
+    text = f"Configure it:\n\n```{tag}\nkey: value\n```"
+
+    assert "key: value" in strip_foreign_code(text, "python")
+
+
+def test_the_learners_own_name_for_the_language_is_understood():
+    text = "```csharp\nvar a = 1;\n```"
+
+    assert "var a = 1;" in strip_foreign_code(text, "C#")
+
+
+def test_several_blocks_are_judged_one_at_a_time():
+    text = "```csharp\nvar a = 1;\n```\n\n```python\nb = 2\n```"
+
+    stripped = strip_foreign_code(text, "python")
+
+    assert "var a = 1;" not in stripped
+    assert "b = 2" in stripped
 
 
 @pytest.mark.asyncio

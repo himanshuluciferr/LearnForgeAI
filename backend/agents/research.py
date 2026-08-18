@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from functools import lru_cache
 
 from agent_framework import Agent, Executor, WorkflowContext, handler
@@ -57,6 +58,16 @@ PAGES_BEFORE_FILTER = 3
 # budget is set by how many areas node 2 actually found instead.
 MAX_LEARN_QUERIES = 8
 MICROSOFT_HOSTS = ("microsoft.com", "azure.com", "dotnet.microsoft.com", "visualstudio.com")
+
+# Only tags naming a programming language are foreign. json, yaml, bash, console and an
+# untagged block belong to no language and are usually the configuration a topic needs.
+FENCED_CODE = re.compile(r"```(\w+)\n.*?```", re.DOTALL)
+PROGRAMMING_LANGUAGES = frozenset(
+    {
+        "csharp", "python", "javascript", "typescript", "java", "go",
+        "rust", "ruby", "php", "cpp", "c", "kotlin", "swift", "scala",
+    }
+)
 
 
 @lru_cache
@@ -129,6 +140,26 @@ def written_for(documents: list[SourceDocument], language: str) -> list[SourceDo
         for document in documents
         if not document.language or document.language == wanted
     ]
+
+
+def strip_foreign_code(text: str, language: str) -> str:
+    """Remove fenced code written in another programming language, keeping the prose.
+
+    A page can carry no language label and still show C#: the durable-task SDK page is
+    untitled by language, survives `written_for`, and supplied the one C# example that
+    reached a Python course. Dropping the page would lose 900 words of good prose to remove
+    two code blocks, so only the blocks go.
+
+    Untagged fences and non-language tags (json, yaml, bash) are kept — they belong to no
+    language and are usually the configuration a topic needs.
+    """
+    wanted = normalise_language(language)
+
+    def keep(match: re.Match[str]) -> str:
+        tag = normalise_language(match.group(1))
+        return "" if tag in PROGRAMMING_LANGUAGES and tag != wanted else match.group(0)
+
+    return FENCED_CODE.sub(keep, text)
 
 
 async def read_documentation(
@@ -237,6 +268,12 @@ async def gather_sources(
     sources = merge(sources, documentation)
     if not sources:
         raise ValueError(f"research-agent could not read any source it selected for {named!r}")
+
+    # Applied to every source, whichever provider found it: a page can carry no language
+    # label and still show code in one.
+    language = request.assumed_programming_language
+    for source in sources:
+        source.text = strip_foreign_code(source.text, language)
 
     logger.info(
         "research-agent: %d results -> %d read + %d documentation pages, %d words",
