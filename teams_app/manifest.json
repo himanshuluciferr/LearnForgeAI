@@ -1,0 +1,47 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "${MICROSOFT_APP_ID}",
+  "packageName": "com.learnforge.ai",
+  "developer": {
+    "name": "LearnForge AI",
+    "websiteUrl": "https://github.com/himanshuluciferr/LearnForgeAI",
+    "privacyUrl": "https://github.com/himanshuluciferr/LearnForgeAI",
+    "termsOfUseUrl": "https://github.com/himanshuluciferr/LearnForgeAI"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "LearnForge",
+    "full": "LearnForge AI course builder"
+  },
+  "description": {
+    "short": "Builds a course on anything you want to learn, then quizzes you on it.",
+    "full": "LearnForge researches a subject from real documentation, writes a course from what it retrieved rather than from memory, and marks your quizzes. Say 'teach me kubernetes operators' to start, 'progress' to see how far you have got, and 'quiz me' to be tested."
+  },
+  "accentColor": "#2F6FEB",
+  "bots": [
+    {
+      "botId": "${MICROSOFT_APP_ID}",
+      "scopes": ["personal"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal"],
+          "commands": [
+            { "title": "teach me", "description": "Start a course, e.g. teach me kubernetes operators" },
+            { "title": "progress", "description": "How far you have got" },
+            { "title": "quiz me", "description": "Take the quiz for the chapter you just read" },
+            { "title": "help", "description": "What I can do" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}

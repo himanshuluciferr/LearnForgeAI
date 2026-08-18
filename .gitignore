@@ -17,3 +17,8 @@ run*.txt
 .vscode/
 .idea/
 .DS_Store
+
+# Built Teams app package; rebuild with teams_app/package.ps1
+learnforge-teams-app.zip
+teams_app/color.png
+teams_app/outline.png

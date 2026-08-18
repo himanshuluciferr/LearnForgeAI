@@ -23,8 +23,11 @@ HELP = (
 
 WORKING = (
     "Building your course now. It takes about twenty minutes because every chapter is written "
-    "from documentation we actually fetch. Say **progress** whenever you want an update."
+    "from documentation we actually fetch. I will ask you to confirm the subject first."
 )
+
+# A run in one of these has not produced a course yet, so progress means the run, not a course.
+UNFINISHED = ("queued", "running", "needs-confirmation", "needs-choice")
 
 
 @dataclass(frozen=True)
@@ -55,18 +58,38 @@ async def handle(text: str | None, user_id: str, client: BackendClient) -> Reply
 
 async def start(command: Command, user_id: str, client: BackendClient) -> Reply:
     job = await client.start_course(user_id, command.text)
-    return Reply(text=f"{WORKING}\n\n_Job {job['job_id']}_")
+    # A card rather than the job id in prose: the learner should not have to retype anything,
+    # and the run stops to ask which subject it found.
+    return Reply(card=progress_card.started(job, WORKING))
 
 
 async def progress(user_id: str, client: BackendClient) -> Reply:
-    """A learner asking for progress may be waiting on a build or working through a finished
-    course, and the answer is different. The job is checked first because it is the one that
-    changes minute to minute."""
+    """A run in flight is the answer if there is one, because it is what changes minute to
+    minute; otherwise the newest finished course."""
+    for job in await client.list_jobs(user_id):
+        if job.get("status") in UNFINISHED:
+            return await job_reply(job, user_id, client)
+
     course = await latest_course(client, user_id)
     if course is None:
         return Reply(text="You have no courses yet. Try **teach me kubernetes operators**.")
     summary = await client.course_progress(course["course_id"], user_id)
     return Reply(card=progress_card.course_progress(summary))
+
+
+async def job_reply(job: dict[str, Any], user_id: str, client: BackendClient) -> Reply:
+    """One place that turns a job into a reply, so a button press and a typed word cannot
+    answer the same state differently."""
+    status = job.get("status")
+    if status == "needs-confirmation":
+        return Reply(card=progress_card.subject_confirmation(job))
+    if status == "needs-choice":
+        return Reply(card=progress_card.choice(job))
+    if status == "completed" and job.get("course_id"):
+        return await ready(job["course_id"], user_id, client)
+    if status in ("failed", "rejected"):
+        return Reply(text=job.get("detail") or job.get("error") or "That run did not finish.")
+    return Reply(card=progress_card.generating(job))
 
 
 async def quiz(command: Command, user_id: str, client: BackendClient) -> Reply:

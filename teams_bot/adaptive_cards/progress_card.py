@@ -16,6 +16,14 @@ def bar(percent: int) -> str:
     return f"{'█' * filled}{'░' * (BAR_WIDTH - filled)}  {percent}%"
 
 
+def started(job: dict[str, Any], message: str) -> dict[str, Any]:
+    return card(
+        text("Course started", size="large", weight="bolder"),
+        text(message),
+        actions=[action("Check progress", {"command": "progress", "job_id": job.get("job_id")})],
+    )
+
+
 def generating(job: dict[str, Any]) -> dict[str, Any]:
     step = (job.get("step") or "starting").replace("-", " ")
     return card(

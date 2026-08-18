@@ -207,18 +207,20 @@ async def test_help_needs_no_backend_at_all():
 
 
 @pytest.mark.asyncio
-async def test_teaching_starts_a_job_and_says_how_long_it_takes():
+async def test_teaching_starts_a_job_and_offers_a_button_rather_than_an_id():
+    """The learner should not have to retype anything, and the run stops to ask which subject
+    it found."""
     handler, seen = routed({"/courses": {"job_id": "j1", "status": "queued", "status_url": "/x"}})
 
     reply = await message_handler.handle("teach me rust", USER, client_for(handler))
 
-    assert "twenty minutes" in reply.text and "j1" in reply.text
+    assert reply.card["actions"][0]["data"] == {"command": "progress", "job_id": "j1"}
     assert json.loads(seen[0].content)["prompt"] == "teach me rust"
 
 
 @pytest.mark.asyncio
-async def test_progress_with_no_courses_says_so_rather_than_failing():
-    handler, _ = routed({"/courses": []})
+async def test_progress_with_nothing_at_all_says_so_rather_than_failing():
+    handler, _ = routed({"/jobs": [], "/courses": []})
 
     reply = await message_handler.handle("progress", USER, client_for(handler))
 
@@ -226,9 +228,25 @@ async def test_progress_with_no_courses_says_so_rather_than_failing():
 
 
 @pytest.mark.asyncio
-async def test_progress_shows_the_newest_course():
+async def test_progress_answers_about_the_run_in_flight_before_any_finished_course():
+    """A build is what changes minute to minute; a finished course is not going anywhere."""
     handler, _ = routed(
         {
+            "/jobs": [{"job_id": "j1", "status": "running", "percent": 40, "step": "chapter"}],
+            "/courses": [{"course_id": COURSE}],
+        }
+    )
+
+    reply = await message_handler.handle("progress", USER, client_for(handler))
+
+    assert "40%" in json.dumps(reply.card)
+
+
+@pytest.mark.asyncio
+async def test_a_finished_run_does_not_hold_up_the_course_progress():
+    handler, _ = routed(
+        {
+            "/jobs": [{"job_id": "j1", "status": "completed", "course_id": COURSE}],
             "/courses": [{"course_id": COURSE, "title": "T", "chapters": 2}],
             f"/progress/{COURSE}": {
                 "course_id": COURSE,

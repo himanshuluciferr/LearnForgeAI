@@ -30,6 +30,8 @@ class JobStore(Protocol):
 
     async def get(self, job_id: str, user_id: str | None = None) -> GenerationJob | None: ...
 
+    async def for_user(self, user_id: str, limit: int = 5) -> list[GenerationJob]: ...
+
     async def update(
         self,
         job_id: str,
@@ -68,6 +70,12 @@ class InMemoryJobStore:
         if job is None or (user_id is not None and job.user_id != user_id):
             return None
         return job
+
+    async def for_user(self, user_id: str, limit: int = 5) -> list[GenerationJob]:
+        async with self._lock:
+            mine = [job for job in self._jobs.values() if job.user_id == user_id]
+        mine.sort(key=lambda job: job.updated_at, reverse=True)
+        return mine[:limit]
 
     async def update(
         self,
@@ -135,6 +143,17 @@ class CosmosJobStore:
             document = found[0]
         # Cosmos adds _rid/_ts/_etag; pydantic ignores unknown keys, so they fall away here.
         return GenerationJob.model_validate(document)
+
+    async def for_user(self, user_id: str, limit: int = 5) -> list[GenerationJob]:
+        found = [
+            item
+            async for item in get_container(JOBS).query_items(
+                "SELECT * FROM c ORDER BY c.updated_at DESC OFFSET 0 LIMIT @limit",
+                parameters=[{"name": "@limit", "value": limit}],
+                partition_key=user_id,
+            )
+        ]
+        return [GenerationJob.model_validate(item) for item in found]
 
     async def update(
         self,

@@ -11,7 +11,7 @@ from typing import Any
 
 from teams_bot.adaptive_cards import progress_card, quiz_card
 from teams_bot.backend_client import BackendClient
-from teams_bot.handlers.message_handler import Reply, ready
+from teams_bot.handlers.message_handler import Reply, job_reply
 
 
 async def handle(payload: dict[str, Any], user_id: str, client: BackendClient) -> Reply:
@@ -44,18 +44,7 @@ async def _progress(payload: dict[str, Any], user_id: str, client: BackendClient
     if not job_id:
         summary = await client.course_progress(payload["course_id"], user_id)
         return Reply(card=progress_card.course_progress(summary))
-
-    job = await client.job_progress(job_id, user_id)
-    status = job.get("status")
-    if status == "needs-confirmation":
-        return Reply(card=progress_card.subject_confirmation(job))
-    if status == "needs-choice":
-        return Reply(card=progress_card.choice(job))
-    if status == "completed" and job.get("course_id"):
-        return await ready(job["course_id"], user_id, client)
-    if status in ("failed", "rejected"):
-        return Reply(text=job.get("detail") or job.get("error") or "That run did not finish.")
-    return Reply(card=progress_card.generating(job))
+    return await job_reply(await client.job_progress(job_id, user_id), user_id, client)
 
 
 async def _answer(payload: dict[str, Any], user_id: str, client: BackendClient) -> Reply:

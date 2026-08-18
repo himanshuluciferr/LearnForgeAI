@@ -41,6 +41,9 @@ class BackendClient:
             "GET", "/courses", params={"user_id": user_id, "limit": limit}
         )
 
+    async def list_jobs(self, user_id: str, limit: int = 5) -> list[dict]:
+        return await self._request("GET", "/jobs", params={"user_id": user_id, "limit": limit})
+
     async def job_progress(self, job_id: str, user_id: str) -> dict:
         return await self._request(
             "GET", f"/courses/{job_id}/progress", params={"user_id": user_id}
