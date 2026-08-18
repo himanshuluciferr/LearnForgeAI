@@ -9,7 +9,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
 from backend.models.course import StoredCourse
 from backend.models.job import GenerationJob, JobStatus
-from backend.schemas.course import ChoiceRequest, CourseRequest, JobAccepted, JobProgress
+from backend.schemas.course import (
+    ChoiceRequest,
+    CourseRequest,
+    CourseSummary,
+    JobAccepted,
+    JobProgress,
+)
 from backend.services.course_store import course_store
 from backend.services.job_store import job_store
 from backend.workflow.runner import run_generation
@@ -103,6 +109,20 @@ async def get_progress(job_id: str, user_id: str) -> JobProgress:
         error=job.error,
         course_id=job.course_id,
     )
+
+
+@router.get("")
+async def list_courses(user_id: str, limit: int = 10) -> list[CourseSummary]:
+    """Newest first, so a client can answer "which course am I on" without keeping state."""
+    return [
+        CourseSummary(
+            course_id=course.id,
+            title=course.state.curriculum.title if course.state.curriculum else "",
+            chapters=len(course.state.chapters),
+            created_at=course.created_at,
+        )
+        for course in await course_store.for_user(user_id, limit)
+    ]
 
 
 @router.get("/{course_id}")

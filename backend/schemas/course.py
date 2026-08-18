@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.models.job import JobStatus
@@ -28,6 +30,16 @@ class JobAccepted(BaseModel):
     job_id: str
     status: JobStatus
     status_url: str
+
+
+class CourseSummary(BaseModel):
+    """Enough to list and choose a course without shipping the whole state, which runs to
+    hundreds of kilobytes."""
+
+    course_id: str
+    title: str
+    chapters: int
+    created_at: datetime
 
 
 class JobProgress(BaseModel):
