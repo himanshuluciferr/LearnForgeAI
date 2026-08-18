@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY teams-bot/ ./teams-bot/
+COPY teams_bot/ ./teams_bot/
 
 EXPOSE 3978
-CMD ["python", "teams-bot/app.py"]
+CMD ["python", "-m", "teams_bot.app"]
