@@ -265,6 +265,44 @@ def test_the_score_still_reports_teaching_alone():
     assert build_result(CourseVerdict(issues=[]), numbered).score == 95
 
 
+# --- a broken import is a fault the reviewer cannot be trusted to find ---------------
+
+
+def test_a_broken_import_sends_the_chapter_back_however_well_it_scored():
+    """The opposite of the claim rule, and deliberately so: this one is exact, there are one or
+    two per course rather than twenty, and the fault says what to write instead."""
+    numbered = [(1, grounded(95))]
+
+    result = build_result(CourseVerdict(issues=[]), numbered, {1: ["`pkg.invented` is in no source"]})
+
+    assert result.regenerate_chapters == [1]
+
+
+def test_the_broken_import_reaches_the_rewrite_ahead_of_the_prose_notes():
+    """A first line that raises ModuleNotFoundError is not recovered by better paragraphs."""
+    verdict = ChapterVerdict(score=40, issues=["vague"], unsupported_claims=["invented"])
+
+    issues = build_result(CourseVerdict(issues=[]), [(1, verdict)], {1: ["`pkg.x` missing"]})
+
+    assert issues.chapter_issues[1][0] == "`pkg.x` missing"
+
+
+def test_broken_imports_are_held_apart_from_the_prose_faults():
+    numbered = [(1, grounded(95))]
+
+    result = build_result(CourseVerdict(issues=[]), numbered, {1: ["`pkg.x` missing"], 2: []})
+
+    assert result.broken_imports == {1: ["`pkg.x` missing"]}
+
+
+def test_a_chapter_with_no_broken_import_is_untouched():
+    numbered = [(1, grounded(95)), (2, grounded(95))]
+
+    result = build_result(CourseVerdict(issues=[]), numbered, {1: [], 2: []})
+
+    assert result.regenerate_chapters == [] and result.broken_imports == {}
+
+
 # --- what each prompt is allowed to see ---------------------------------------------
 
 def test_the_chapter_reviewer_reads_the_actual_prose():

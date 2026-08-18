@@ -898,6 +898,8 @@ class ReviewResult(BaseModel):
     # Held apart from chapter_issues, which flattens every fault into prose for the rewrite.
     # Counting these must not mean matching a sentence we wrote ourselves.
     unsupported_claims: dict[int, list[str]] = Field(default_factory=dict)
+    # Exact rather than judged: an import either appears in the retrieved text or it does not.
+    broken_imports: dict[int, list[str]] = Field(default_factory=dict)
 
 
 class ReviewRound(BaseModel):

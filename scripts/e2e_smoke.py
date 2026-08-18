@@ -333,6 +333,11 @@ def report_grounding(state) -> None:
           f"{len(state.review.unsupported_claims)} of {len(state.chapters)} chapters", flush=True)
     for claim in claims[:8]:
         print(f"    {claim[:150]}", flush=True)
+    broken = [fault for chapter in state.review.broken_imports.values() for fault in chapter]
+    print(f"  broken imports       {len(broken)} across "
+          f"{len(state.review.broken_imports)} of {len(state.chapters)} chapters", flush=True)
+    for fault in broken:
+        print(f"    {fault[:150]}", flush=True)
 
 
 async def main():

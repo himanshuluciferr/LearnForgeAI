@@ -11,6 +11,7 @@ from backend.agents.chapter import CHARS_PER_TOPIC
 from backend.agents.fanout import per_chapter
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
+from backend.skills.grounding.skill import unknown_imports
 from backend.skills.passages.skill import passages_for
 from backend.workflow.state import (
     PASSING_REVIEW_SCORE,
@@ -148,34 +149,46 @@ def collect_issues(
     return issues
 
 
-def faults(verdict: ChapterVerdict) -> list[str]:
-    """Unsupported claims first: a chapter that teaches something the sources never showed is
-    wrong, which matters more than any gap in how well it teaches."""
-    return [f"Not supported by the sources: {claim}" for claim in verdict.unsupported_claims] + list(
-        verdict.issues
+def faults(verdict: ChapterVerdict, broken: list[str] | None = None) -> list[str]:
+    """Broken imports first: they stop the learner's first line from running, and no amount of
+    sound prose around them recovers that."""
+    return (
+        list(broken or [])
+        + [f"Not supported by the sources: {claim}" for claim in verdict.unsupported_claims]
+        + list(verdict.issues)
     )
 
 
 def build_result(
-    course: CourseVerdict, numbered: list[tuple[int, ChapterVerdict]]
+    course: CourseVerdict,
+    numbered: list[tuple[int, ChapterVerdict]],
+    broken_imports: dict[int, list[str]] | None = None,
 ) -> ReviewResult:
+    broken = broken_imports or {}
     verdicts = [verdict for _, verdict in numbered]
-    # Claims are reported but do not trigger a rewrite. Rewriting on them cost 37% more wall
-    # clock and still ended at the revision cap with every chapter flagged: the writer invents
-    # because the sources are thin, and another draft off the same sources cannot fix that.
-    weak = [number for number, verdict in numbered if verdict.score < PASSING_REVIEW_SCORE]
+    # A broken import triggers a rewrite where an unsupported claim does not. It is exact rather
+    # than judged, there are one or two per course rather than twenty, and the fault names the
+    # module the sources do use, so the rewrite is told what to write instead.
+    weak = [
+        number
+        for number, verdict in numbered
+        if verdict.score < PASSING_REVIEW_SCORE or broken.get(number)
+    ]
     return ReviewResult(
         score=overall_score(verdicts),
         issues=collect_issues(course, numbered),
         regenerate_chapters=weak,
         chapter_issues={
-            number: faults(verdict) for number, verdict in numbered if faults(verdict)
+            number: faults(verdict, broken.get(number))
+            for number, verdict in numbered
+            if faults(verdict, broken.get(number))
         },
         unsupported_claims={
             number: verdict.unsupported_claims
             for number, verdict in numbered
             if verdict.unsupported_claims
         },
+        broken_imports={number: found for number, found in broken.items() if found},
     )
 
 
@@ -201,7 +214,11 @@ async def review_course(
     numbered = [(chapter.number, verdict) for chapter, verdict in zip(chapters, verdicts)]
 
     course = await review_whole_course(request, curriculum, chapters)
-    result = build_result(course, numbered)
+    broken = {
+        chapter.number: unknown_imports(chapter.body_markdown, sources or [])
+        for chapter in chapters
+    }
+    result = build_result(course, numbered, broken)
     logger.info(
         "review-agent: scored %d, rewriting %s",
         result.score,
