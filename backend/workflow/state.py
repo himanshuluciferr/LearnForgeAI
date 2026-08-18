@@ -88,6 +88,10 @@ class MissingRequirement(StrEnum):
 # Used when the learner gave no time commitment. Node 1 records the absence; every
 # downstream node needs a number.
 DEFAULT_DAILY_MINUTES = 30
+# Used when the learner named no language. A course must pick one and say so: measured, a
+# corpus holding both C# and Python variants of the same page produced a course that taught
+# 27 C# examples and 7 Python ones, switching between topics.
+DEFAULT_PROGRAMMING_LANGUAGE = "python"
 
 
 class LearningRequest(BaseModel):
@@ -136,6 +140,15 @@ class LearningRequest(BaseModel):
     language: str = Field(
         default="en", description="ISO 639-1 code for the course language, e.g. 'en', 'hi'. Not the language name."
     )
+    programming_language: str | None = Field(
+        default=None,
+        description=(
+            "The programming language the learner asked for, lowercased, e.g. 'python', "
+            "'csharp', 'typescript'. Only when they actually named one — null otherwise. Never "
+            "infer it from the subject: most frameworks support several, and picking one for "
+            "the learner is the kind of quiet choice that produces a course they cannot use."
+        ),
+    )
     alternatives: list[str] = Field(
         default_factory=list,
         description=(
@@ -165,6 +178,12 @@ class LearningRequest(BaseModel):
     def minutes_per_day(self) -> int:
         return self.daily_minutes or DEFAULT_DAILY_MINUTES
 
+    @property
+    def assumed_programming_language(self) -> str:
+        """The language the course is written in. Unstated becomes the default here, in one
+        place, so no downstream node invents its own — and so the assumption has a name."""
+        return self.programming_language or DEFAULT_PROGRAMMING_LANGUAGE
+
 
 class SourceDocument(BaseModel):
     """A page we fetched and read. The first thing in this pipeline that keeps the retrieved
@@ -173,6 +192,9 @@ class SourceDocument(BaseModel):
     title: str
     url: str
     text: str
+    # Set only where a provider states it. Empty means the page is language-neutral, which is
+    # not the same as unknown: those pages suit any course.
+    language: str = ""
 
     @property
     def words(self) -> int:
@@ -387,14 +409,37 @@ class SourceSelection(BaseModel):
     )
 
 
+class TopicOutline(BaseModel):
+    """One planned topic inside a chapter — the unit a single writer call produces.
+
+    Titles are planned here rather than invented by the writer. Left to itself the writer
+    named sections after their own job ("What you'll be able to do (and what goes wrong
+    without this)"), which is what makes a page read as a filled-in template.
+    """
+
+    title: str = Field(
+        description=(
+            "The subject this topic covers, named as a thing rather than as a task. "
+            "'Function tools and schema generation', never 'Overview' or 'How it works'."
+        )
+    )
+    objectives: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One or two things the learner can DO after this topic. Start each with a verb "
+            "and make it checkable — 'register a function tool' not 'understand tools'."
+        ),
+    )
+
+
 class ChapterOutline(BaseModel):
-    """One planned chapter. The prose itself is written later by chapter-agent."""
+    """One planned chapter: a part of the course, covered by its ordered topics."""
 
     number: int = Field(description="Position in the course, starting at 1.")
     title: str = Field(
         description=(
-            "What this chapter teaches, stated concretely. Name the actual topic rather "
-            "than using a placeholder like 'Introduction' or 'Getting Started'."
+            "The area of the subject this chapter covers, stated concretely. Name the "
+            "actual area rather than using a placeholder like 'Introduction'."
         )
     )
     objectives: list[str] = Field(
@@ -402,6 +447,14 @@ class ChapterOutline(BaseModel):
         description=(
             "Two to four things the learner can DO after this chapter. Start each with a "
             "verb, and make them checkable — 'create an index' not 'understand indexing'."
+        ),
+    )
+    topics: list[TopicOutline] = Field(
+        default_factory=list,
+        description=(
+            "The topics this chapter is made of, in reading order. Each is one self-contained "
+            "subject that a reader could look up on its own. Together they must cover the "
+            "chapter's objectives and must not overlap each other."
         ),
     )
 
@@ -416,6 +469,122 @@ class Curriculum(BaseModel):
     chapters: list[ChapterOutline] = Field(
         description="Ordered chapters. Each must build on the previous ones, never repeat them."
     )
+
+
+class DiagramKind(StrEnum):
+    FLOW = "flow"
+    SEQUENCE = "sequence"
+
+
+class DiagramEdge(BaseModel):
+    """One arrow. Both ends name a node by its exact label rather than by position, because a
+    number is a claim about a list the model has to hold in its head while writing it."""
+
+    source: str = Field(description="Label of the node the arrow leaves, copied exactly.")
+    target: str = Field(description="Label of the node the arrow reaches, copied exactly.")
+    label: str = Field(
+        default="",
+        description=(
+            "What happens along this arrow, in a few words — 'returns tool call', 'on "
+            "failure'. Leave empty when the arrow is simply the next step."
+        ),
+    )
+
+
+class ChapterDiagram(BaseModel):
+    """One picture of how the chapter's pieces fit together.
+
+    Only the parts are asked for. The Mermaid itself is written by the diagram skill, because
+    drawing syntax is the same kind of mechanical detail as a folder tree's box characters:
+    the model knows the relationships and gets the punctuation subtly wrong.
+    """
+
+    kind: DiagramKind = Field(
+        description=(
+            "'flow' for a process, pipeline or set of parts that feed each other. "
+            "'sequence' for who calls whom, in order, over time."
+        )
+    )
+    title: str = Field(
+        description="What the diagram shows, as a caption — 'How a request reaches the model'."
+    )
+    nodes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Two to eight short labels for the boxes, or the participants for a sequence. "
+            "Name real components from this chapter, never 'Step 1' or 'Process'."
+        ),
+    )
+    edges: list[DiagramEdge] = Field(
+        default_factory=list,
+        description=(
+            "The arrows between those nodes. Every source and target must be one of the "
+            "labels above, spelled identically, or the arrow is dropped."
+        ),
+    )
+
+
+class TopicDraft(BaseModel):
+    """Response schema for one topic — the unit chapter-agent writes per call.
+
+    The parts are asked for separately rather than as one blob so the document structure is
+    rendered here instead of hoped for, and so a reader can find the same part of every
+    topic in the same place.
+    """
+
+    what_it_is: str = Field(
+        description=(
+            "What this topic is, in Markdown. Define it plainly first, then precisely. "
+            "Bold each term the first time it is defined."
+        )
+    )
+    why_it_matters: str = Field(
+        description=(
+            "The engineering problem this exists to solve, and what goes wrong without it. "
+            "Lead with the problem a reader would recognise, not with a restatement of the "
+            "definition above."
+        )
+    )
+    how_to_use: str = Field(
+        description=(
+            "How it is actually used, in Markdown: the real names, settings and steps, with "
+            "fenced code blocks where the sources show them. Where two options are being "
+            "compared on the same points, use a Markdown table."
+        )
+    )
+    implementation: str = Field(
+        default="",
+        description=(
+            "A complete, runnable example, as a single fenced code block with a language "
+            "tag. Include one whenever the sources show enough to write code that would "
+            "actually run. Leave empty rather than inventing an API the sources do not show."
+        ),
+    )
+    diagram: ChapterDiagram | None = Field(
+        default=None,
+        description=(
+            "A diagram of how this topic's pieces relate. Include one whenever the topic "
+            "describes things that flow into, call, or transform one another, or that have a "
+            "shape before and after some operation. Omit it when there is nothing to connect."
+        ),
+    )
+
+
+class Topic(BaseModel):
+    """A written topic, fitted back onto the position and title the curriculum planned."""
+
+    chapter_number: int
+    number: int
+    title: str
+    what_it_is: str
+    why_it_matters: str
+    how_to_use: str
+    implementation: str = ""
+    diagram: ChapterDiagram | None = None
+
+    @property
+    def label(self) -> str:
+        return f"{self.chapter_number}.{self.number}"
 
 
 class ChapterSection(BaseModel):
@@ -435,21 +604,23 @@ class ChapterSection(BaseModel):
             "heading above is rendered for you."
         )
     )
+    takeaway: str = Field(
+        default="",
+        description=(
+            "One sentence stating the rule or fact this section exists to establish, pulled "
+            "out so it can be found again at a glance. Leave empty where the section is a "
+            "worked example that carries no separate rule."
+        ),
+    )
 
 
 class ChapterDraft(BaseModel):
-    """Response schema for chapter-agent.
+    """Response schema for the per-chapter wrap call.
 
-    The number and title are already fixed by the curriculum, so the model is asked only
-    for what it alone can produce. Whatever it returns is fitted back onto its outline.
+    The body is written topic by topic, so this call only produces what has to be judged
+    across the whole chapter once every topic in it is written.
     """
 
-    sections: list[ChapterSection] = Field(
-        description=(
-            "Three to six sections in reading order. The first must show the learner "
-            "something concrete; the last must leave them able to do the objectives."
-        )
-    )
     key_points: list[str] = Field(
         description=(
             "Three to six one-line takeaways worth revising later. State facts and rules, "
@@ -465,14 +636,19 @@ class ChapterDraft(BaseModel):
 
 
 class Chapter(BaseModel):
-    """A written chapter: its outline's number and title, plus the drafted content."""
+    """A written chapter: its outline's number and title, plus the topics it is made of."""
 
     number: int
     title: str
     body_markdown: str
+    # The same content as body_markdown, kept structured so a card or a rewrite can address
+    # one topic without re-parsing the rendered page.
+    topics: list[Topic] = Field(default_factory=list)
     key_points: list[str] = Field(default_factory=list)
     # Do-it-now tasks with no answer shipped. Anything with a worked answer is a PracticeItem.
     exercises: list[str] = Field(default_factory=list)
+    # Optional with a default, so courses stored before diagrams existed still load.
+    diagram: ChapterDiagram | None = None
 
 
 class PracticeKind(StrEnum):
@@ -502,8 +678,9 @@ class PracticeTask(BaseModel):
     )
     solution: str = Field(
         description=(
-            "The worked answer, with the reasoning or the code, so a learner can mark "
-            "themselves. Never a single word and never just a restatement of the task."
+            "The worked answer a learner marks themselves against: the answer itself, then "
+            "one line on the part people get wrong. Never a single word, and never a "
+            "re-teaching of the chapter they have just read."
         )
     )
 
@@ -632,8 +809,8 @@ class QuizDraft(BaseModel):
     )
     explanation: str = Field(
         description=(
-            "Why the right answer is right and why a learner picking a wrong one went "
-            "astray. Never mention option letters or positions."
+            "One or two sentences: why the right answer is right and why a learner picking "
+            "a wrong one went astray. Never mention option letters or positions."
         )
     )
 

@@ -3,15 +3,18 @@
 import pytest
 
 from backend.agents import curriculum as curriculum_module
-from backend.agents.chapter import CHARS_PER_CHAPTER
 from backend.agents.curriculum import (
+    CHARS_PER_CHAPTER,
     MAX_CHAPTERS,
+    MAX_TOPICS_PER_CHAPTER,
     MIN_CHAPTERS,
+    MIN_TOPICS_PER_CHAPTER,
     CurriculumExecutor,
     build_prompt,
     format_sources,
     plan_chapter_count,
     plan_curriculum,
+    plan_topic_count,
     starting_point,
     tidy,
 )
@@ -26,6 +29,7 @@ from backend.workflow.state import (
     ResourceKind,
     SubjectAnalysis,
     TechnicalSubjectType,
+    TopicOutline,
     WorkflowStep,
     progress_percent,
 )
@@ -92,12 +96,20 @@ def make_sources(chars: int, count: int = 3) -> list[ResearchSource]:
     ]
 
 
-def make_curriculum(count: int, start: int = 1) -> Curriculum:
+def make_curriculum(count: int, start: int = 1, topics: int = 2) -> Curriculum:
     return Curriculum(
         title="t",
         summary="s",
         chapters=[
-            ChapterOutline(number=n, title=f"c{n}", objectives=["do a thing"])
+            ChapterOutline(
+                number=n,
+                title=f"c{n}",
+                objectives=["do a thing"],
+                topics=[
+                    TopicOutline(title=f"t{n}.{m}", objectives=["use it"])
+                    for m in range(1, topics + 1)
+                ],
+            )
             for n in range(start, start + count)
         ],
     )
@@ -141,13 +153,12 @@ def test_the_floor_still_holds_when_there_is_barely_any_evidence():
 def test_prompt_states_the_computed_count_rather_than_asking_for_a_guess():
     prompt = build_prompt(make_request(), make_subject(), make_sources(chars=40 * CHARS_PER_CHAPTER))
 
-    assert "Produce exactly 10 chapters." in prompt
+    assert "Produce exactly 10 chapters" in prompt
 
 
-def test_prompt_carries_pacing_and_language():
+def test_prompt_carries_the_language():
     prompt = build_prompt(make_request(language="hi", daily_minutes=60), make_subject(), [])
 
-    assert "60 minutes each" in prompt
     assert "Course language: hi" in prompt
 
 
@@ -210,14 +221,45 @@ def test_planning_is_given_titles_rather_than_the_whole_page():
 def test_numbering_is_ours_not_the_models():
     curriculum = make_curriculum(3, start=7)
 
-    assert [c.number for c in tidy(curriculum).chapters] == [1, 2, 3]
+    assert [c.number for c in tidy(curriculum, MAX_TOPICS_PER_CHAPTER).chapters] == [1, 2, 3]
 
 
 def test_too_many_chapters_are_trimmed_to_the_cap():
-    tidied = tidy(make_curriculum(40))
+    tidied = tidy(make_curriculum(40), MAX_TOPICS_PER_CHAPTER)
 
     assert len(tidied.chapters) == MAX_CHAPTERS
     assert [c.number for c in tidied.chapters] == list(range(1, MAX_CHAPTERS + 1))
+
+
+def test_a_chapter_may_not_hold_more_topics_than_the_evidence_funds():
+    """One writer call per topic, so the topic budget is what sets the cost of a course."""
+    tidied = tidy(make_curriculum(2, topics=8), 3)
+
+    assert [len(chapter.topics) for chapter in tidied.chapters] == [3, 3]
+
+
+def test_a_chapter_with_fewer_topics_than_the_budget_is_left_alone():
+    """The limit is a ceiling, not a quota — a thin area should stay short."""
+    tidied = tidy(make_curriculum(2, topics=2), 6)
+
+    assert [len(chapter.topics) for chapter in tidied.chapters] == [2, 2]
+
+
+def test_topic_budget_follows_retrieved_volume_and_is_clamped():
+    """Depth has to follow the evidence: `target_words` was one number for every chapter no
+    matter the subject, so a large area and a small one came out the same length."""
+    thin = plan_topic_count(5, make_sources(chars=75_073))
+    plenty = plan_topic_count(5, make_sources(chars=400_000))
+
+    assert thin == MIN_TOPICS_PER_CHAPTER
+    assert plenty == MAX_TOPICS_PER_CHAPTER
+    assert thin < plenty
+
+
+def test_more_chapters_share_the_same_evidence_so_each_gets_fewer_topics():
+    sources = make_sources(chars=200_000)
+
+    assert plan_topic_count(5, sources) >= plan_topic_count(20, sources)
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from functools import lru_cache
 
 from agent_framework import Agent, Executor, WorkflowContext, handler
 
-from backend.agents.chapter import CHARS_PER_CHAPTER
+from backend.agents.chapter import CHARS_PER_TOPIC
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
 from backend.workflow.state import (
@@ -27,6 +27,14 @@ AGENT_NAME = "curriculum-agent"
 # chapter-agent writes prose for every chapter, so this cap bounds the most expensive step.
 MAX_CHAPTERS = 20
 MIN_CHAPTERS = 5
+
+# One writer call per topic, so the topic budget is what actually sets the cost of a course.
+MIN_TOPICS_PER_CHAPTER = 3
+MAX_TOPICS_PER_CHAPTER = 8
+
+# Not a new constant: a chapter is worth planning only if the evidence can fund its minimum
+# topics, and the writer's own per-topic budget is what says how much text that takes.
+CHARS_PER_CHAPTER = CHARS_PER_TOPIC * MIN_TOPICS_PER_CHAPTER
 
 
 @lru_cache
@@ -62,6 +70,17 @@ def plan_chapter_count(subject: SubjectAnalysis, sources: list[ResearchSource]) 
     return max(MIN_CHAPTERS, min(MAX_CHAPTERS, len(subject.scope), afforded))
 
 
+def plan_topic_count(chapters: int, sources: list[ResearchSource]) -> int:
+    """How many topics each chapter may hold, from the text we actually retrieved.
+
+    Depth has to follow the evidence rather than the learner's clock. `target_words` is one
+    number for every chapter regardless of subject, which is why a large area and a small one
+    came out the same length; the topic count is the lever that lets them differ.
+    """
+    afforded = sum(len(source.text) for source in sources) // CHARS_PER_TOPIC
+    return max(MIN_TOPICS_PER_CHAPTER, min(MAX_TOPICS_PER_CHAPTER, afforded // chapters))
+
+
 def format_sources(sources: list[ResearchSource]) -> str:
     """Titles only. Planning needs to know what ground the sources cover; the text itself goes
     to the chapter writer, where it is actually read."""
@@ -86,6 +105,7 @@ def build_prompt(
     request: LearningRequest, subject: SubjectAnalysis, sources: list[ResearchSource]
 ) -> str:
     chapters = plan_chapter_count(subject, sources)
+    topics = plan_topic_count(chapters, sources)
     prerequisites = ", ".join(subject.prerequisites) or "none"
     return (
         f"Skill: {subject.canonical_name or request.skill}\n"
@@ -95,16 +115,17 @@ def build_prompt(
         f"Goal: {request.goal or 'not stated'}\n"
         f"Assumed knowledge, do not teach: {prerequisites}\n"
         f"Where to start: {starting_point(request)}\n"
-        f"Course length: {chapters} chapters, one sitting of about "
-        f"{request.minutes_per_day} minutes each\n"
+        f"Course length: {chapters} chapters\n"
         f"Course language: {request.language}\n"
-        f"Produce exactly {chapters} chapters.\n\n"
+        f"Produce exactly {chapters} chapters, each holding at most {topics} topics.\n"
+        f"Give a chapter fewer topics where the sources are thin on its area; the limit is a "
+        f"ceiling, not a quota.\n\n"
         f"Verified sources:\n{format_sources(sources)}"
     )
 
 
-def tidy(curriculum: Curriculum) -> Curriculum:
-    """Enforces the count cap and renumbers, so chapter numbers are ours rather than the model's."""
+def tidy(curriculum: Curriculum, topics_per_chapter: int) -> Curriculum:
+    """Enforces the count caps and renumbers, so chapter numbers are ours rather than the model's."""
     if len(curriculum.chapters) > MAX_CHAPTERS:
         logger.info(
             "curriculum-agent: trimming %d chapters to %d",
@@ -115,6 +136,14 @@ def tidy(curriculum: Curriculum) -> Curriculum:
 
     for position, chapter in enumerate(curriculum.chapters, start=1):
         chapter.number = position
+        if len(chapter.topics) > topics_per_chapter:
+            logger.info(
+                "curriculum-agent: trimming chapter %d from %d topics to %d",
+                position,
+                len(chapter.topics),
+                topics_per_chapter,
+            )
+            chapter.topics = chapter.topics[:topics_per_chapter]
     return curriculum
 
 
@@ -128,7 +157,8 @@ async def plan_curriculum(
     if not curriculum.chapters:
         raise ValueError("curriculum-agent returned no chapters")
 
-    return tidy(curriculum)
+    chapters = plan_chapter_count(subject, sources)
+    return tidy(curriculum, plan_topic_count(chapters, sources))
 
 
 class CurriculumExecutor(Executor):

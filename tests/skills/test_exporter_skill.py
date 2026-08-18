@@ -11,14 +11,18 @@ from backend.skills.exporter.skill import (
     numbered,
     option_label,
     render_course,
+    render_figure,
     render_project,
     render_quiz,
 )
 from backend.workflow.state import (
     Chapter,
+    ChapterDiagram,
     ChapterOutline,
     CourseState,
     Curriculum,
+    DiagramEdge,
+    DiagramKind,
     ExperienceLevel,
     LearningRequest,
     PracticeItem,
@@ -108,6 +112,52 @@ def test_headings_never_run_past_the_deepest_level_markdown_has():
 
 def test_a_hash_that_is_not_a_heading_is_left_alone():
     assert demote_headings("#hashtag\nC# is a language") == "#hashtag\nC# is a language"
+
+
+# --- figures ------------------------------------------------------------------------
+
+
+def drawn(**overrides) -> ChapterDiagram:
+    return ChapterDiagram(
+        **{
+            "kind": DiagramKind.FLOW,
+            "title": "How a request reaches the model",
+            "nodes": ["Agent", "Model Client"],
+            "edges": [DiagramEdge(source="Agent", target="Model Client")],
+            **overrides,
+        }
+    )
+
+
+def test_a_figure_is_captioned_and_placed_before_the_prose_it_explains():
+    with_figure = chapter()
+    with_figure.diagram = drawn()
+
+    rendered = render_figure(with_figure)
+
+    assert rendered.startswith("**Figure — How a request reaches the model**")
+    assert "```mermaid" in rendered
+
+
+def test_a_chapter_with_no_diagram_prints_no_figure():
+    assert render_figure(chapter()) == ""
+
+
+def test_an_undrawable_diagram_leaves_no_empty_caption():
+    """The caption must not survive a diagram the skill refused to draw."""
+    with_figure = chapter()
+    with_figure.diagram = drawn(edges=[])
+
+    assert render_figure(with_figure) == ""
+
+
+def test_the_figure_reaches_the_published_document_above_the_body():
+    with_figure = chapter(body="## Prose heading\n\nSome prose.")
+    with_figure.diagram = drawn()
+
+    document = render_course(state(chapters=[with_figure]))
+
+    assert document.index("```mermaid") < document.index("Prose heading")
 
 
 # --- options ------------------------------------------------------------------------

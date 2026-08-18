@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from backend.skills.diagrams.skill import render_diagram
 from backend.workflow.state import (
     Chapter,
     CourseState,
@@ -136,10 +137,20 @@ def render_quiz(quiz: Quiz) -> str:
     return "\n\n".join(blocks)
 
 
+def render_figure(chapter: Chapter) -> str:
+    """Sits before the prose, because its job is to orient the reader rather than recap them."""
+    mermaid = render_diagram(chapter.diagram)
+    if not mermaid:
+        return ""
+    assert chapter.diagram is not None
+    return f"**Figure — {' '.join(chapter.diagram.title.split())}**\n\n{mermaid}"
+
+
 def render_chapter(chapter: Chapter, practice: list[PracticeItem], quiz: Quiz | None) -> str:
     return join(
         [
             f"## Chapter {chapter.number}: {chapter.title}",
+            render_figure(chapter),
             demote_headings(chapter.body_markdown),
             section("### Key points", bullets(chapter.key_points)),
             section("### Try it now", bullets(chapter.exercises)),
@@ -192,6 +203,9 @@ def header(state: CourseState) -> str:
     facts = [
         f"**Skill:** {name or state.request.skill}",
         f"**Level:** {state.request.assumed_level}",
+        # Shown because it is assumed when the learner says nothing, and a silent assumption
+        # is one they cannot correct.
+        f"**Code:** {state.request.assumed_programming_language}",
         f"**Chapters:** {len(state.chapters)}",
     ]
 
@@ -199,10 +213,11 @@ def header(state: CourseState) -> str:
 
 
 def contents(chapters: list[Chapter]) -> str:
-    return section(
-        "## Contents",
-        bullets([f"Chapter {chapter.number}: {chapter.title}" for chapter in chapters]),
-    )
+    lines: list[str] = []
+    for chapter in chapters:
+        lines.append(f"- Chapter {chapter.number}: {chapter.title}")
+        lines.extend(f"  - {topic.label} {topic.title}" for topic in chapter.topics)
+    return section("## Contents", "\n".join(lines))
 
 
 def render_course(state: CourseState) -> str:
