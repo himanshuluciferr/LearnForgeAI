@@ -16,16 +16,22 @@ from botbuilder.core import BotFrameworkAdapterSettings
 from botbuilder.core.integration import aiohttp_error_middleware
 from botbuilder.integration.aiohttp import BotFrameworkHttpAdapter
 from botbuilder.schema import Activity
+from dotenv import load_dotenv
 
 from teams_bot.bot import LearnForgeBot
+
+# The bot runs as its own process, so nothing else has read .env for it. Without this, setting
+# MICROSOFT_APP_ID there would silently do nothing and every Teams call would fail as 401.
+load_dotenv(override=False)
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("PORT", "3978"))
+APP_ID = os.getenv("MICROSOFT_APP_ID", "")
 
 settings = BotFrameworkAdapterSettings(
-    app_id=os.getenv("MICROSOFT_APP_ID", ""),
+    app_id=APP_ID,
     app_password=os.getenv("MICROSOFT_APP_PASSWORD", ""),
 )
 adapter = BotFrameworkHttpAdapter(settings)
@@ -52,7 +58,15 @@ async def messages(request: web.Request) -> web.Response:
 
 
 async def health(_: web.Request) -> web.Response:
-    return web.json_response({"status": "ok"})
+    """Also reports whether an app id was found, because the failure it prevents — every Teams
+    call returning 401 — gives no hint that the id was simply missing."""
+    return web.json_response(
+        {
+            "status": "ok",
+            "authenticated": bool(APP_ID),
+            "backend": os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000"),
+        }
+    )
 
 
 def build_app() -> web.Application:
