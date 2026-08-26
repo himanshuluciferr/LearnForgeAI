@@ -38,7 +38,7 @@ settings = BotFrameworkAdapterSettings(
 )
 adapter = BotFrameworkHttpAdapter(settings)
 client = BackendClient()
-bot = LearnForgeBot(client, JobWatcher(adapter, client, APP_ID))
+bot = LearnForgeBot(client, JobWatcher(adapter, client, app_id=APP_ID))
 
 
 async def on_error(context, error: Exception) -> None:
