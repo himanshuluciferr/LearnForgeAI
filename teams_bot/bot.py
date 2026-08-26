@@ -7,6 +7,7 @@ Reply, so the behaviour is testable without an adapter or a running backend.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from botbuilder.core import ActivityHandler, CardFactory, MessageFactory, TurnContext
 
@@ -19,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class LearnForgeBot(ActivityHandler):
-    def __init__(self, client: BackendClient | None = None) -> None:
+    def __init__(self, client: BackendClient | None = None, watcher: Any = None) -> None:
         self._client = client or BackendClient()
+        self._watcher = watcher
 
     async def on_message_activity(self, turn_context: TurnContext) -> None:
         activity = turn_context.activity
@@ -34,7 +36,15 @@ class LearnForgeBot(ActivityHandler):
             # The learner gets a sentence rather than a stack trace, and we keep the trace.
             logger.exception("teams-bot: turn failed for %s", user_id)
             reply = Reply(text="Something went wrong reaching the course service. Try again.")
-        await self._send(turn_context, reply)
+
+        sent = await self._send(turn_context, reply)
+        if reply.watch_job and self._watcher and sent:
+            self._watcher.watch(
+                TurnContext.get_conversation_reference(activity),
+                sent.id,
+                reply.watch_job,
+                user_id,
+            )
 
     async def on_members_added_activity(self, members_added, turn_context: TurnContext) -> None:
         for member in members_added:
@@ -42,9 +52,10 @@ class LearnForgeBot(ActivityHandler):
                 await turn_context.send_activity(MessageFactory.text(HELP))
 
     @staticmethod
-    async def _send(turn_context: TurnContext, reply: Reply) -> None:
+    async def _send(turn_context: TurnContext, reply: Reply):
+        """Returns the resource response, whose id is what a later edit needs to replace this
+        card rather than post another one under it."""
         if reply.card:
             attachment = CardFactory.adaptive_card(reply.card)
-            await turn_context.send_activity(MessageFactory.attachment(attachment))
-        else:
-            await turn_context.send_activity(MessageFactory.text(reply.text))
+            return await turn_context.send_activity(MessageFactory.attachment(attachment))
+        return await turn_context.send_activity(MessageFactory.text(reply.text))

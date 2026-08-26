@@ -18,7 +18,9 @@ from botbuilder.integration.aiohttp import BotFrameworkHttpAdapter
 from botbuilder.schema import Activity
 from dotenv import load_dotenv
 
+from teams_bot.backend_client import BackendClient
 from teams_bot.bot import LearnForgeBot
+from teams_bot.watcher import JobWatcher
 
 # The bot runs as its own process, so nothing else has read .env for it. Without this, setting
 # MICROSOFT_APP_ID there would silently do nothing and every Teams call would fail as 401.
@@ -35,7 +37,8 @@ settings = BotFrameworkAdapterSettings(
     app_password=os.getenv("MICROSOFT_APP_PASSWORD", ""),
 )
 adapter = BotFrameworkHttpAdapter(settings)
-bot = LearnForgeBot()
+client = BackendClient()
+bot = LearnForgeBot(client, JobWatcher(adapter, client))
 
 
 async def on_error(context, error: Exception) -> None:

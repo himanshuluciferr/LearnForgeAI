@@ -36,6 +36,8 @@ class Reply:
 
     text: str = ""
     card: dict[str, Any] | None = None
+    # Set when this card is worth keeping up to date, which the bot does by editing it in place.
+    watch_job: str | None = None
 
 
 async def latest_course(client: BackendClient, user_id: str) -> dict[str, Any] | None:
@@ -89,7 +91,7 @@ async def job_reply(job: dict[str, Any], user_id: str, client: BackendClient) ->
         return await ready(job["course_id"], user_id, client)
     if status in ("failed", "rejected"):
         return Reply(text=job.get("detail") or job.get("error") or "That run did not finish.")
-    return Reply(card=progress_card.generating(job))
+    return Reply(card=progress_card.generating(job), watch_job=job.get("job_id"))
 
 
 async def quiz(command: Command, user_id: str, client: BackendClient) -> Reply:
