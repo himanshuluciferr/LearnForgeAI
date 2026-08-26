@@ -20,12 +20,20 @@ USER = "aad-1"
 
 
 class StubAdapter:
-    """Records the activities a continued conversation tried to update."""
+    """Records the activities a continued conversation tried to update.
+
+    Mirrors the real signature, including the identity arguments, because getting those wrong
+    is what stopped the first version working at all.
+    """
 
     def __init__(self) -> None:
         self.updated: list[object] = []
+        self.identities: list[object] = []
 
-    async def continue_conversation(self, reference, callback, bot_id=None):
+    async def continue_conversation(
+        self, reference, callback, bot_id=None, claims_identity=None, audience=None
+    ):
+        self.identities.append(claims_identity or bot_id)
         await callback(SimpleNamespace(update_activity=self._capture))
 
     async def _capture(self, activity) -> None:
@@ -68,7 +76,7 @@ async def test_the_card_is_edited_rather_than_a_new_one_posted():
     """Without the id, every update would land as another card and the chat would fill with
     stale progress bars."""
     adapter = StubAdapter()
-    watcher = JobWatcher(adapter, client_returning(running(30), {"job_id": "j1", "status": "failed"}), 0)
+    watcher = JobWatcher(adapter, client_returning(running(30), {"job_id": "j1", "status": "failed"}), poll_seconds=0)
 
     await watcher.watch(reference(), "activity-7", "j1", USER)
 
@@ -79,7 +87,9 @@ async def test_the_card_is_edited_rather_than_a_new_one_posted():
 async def test_it_stops_once_the_run_stops():
     adapter = StubAdapter()
     watcher = JobWatcher(
-        adapter, client_returning(running(30), {"job_id": "j1", "status": "rejected", "detail": "no"}), 0
+        adapter,
+        client_returning(running(30), {"job_id": "j1", "status": "rejected", "detail": "no"}),
+        poll_seconds=0,
     )
 
     await watcher.watch(reference(), "a", "j1", USER)
@@ -95,7 +105,7 @@ async def test_an_unchanged_job_is_not_redrawn():
     watcher = JobWatcher(
         adapter,
         client_returning(running(30), running(30), running(30), {"job_id": "j1", "status": "failed"}),
-        0,
+        poll_seconds=0,
     )
 
     await watcher.watch(reference(), "a", "j1", USER)
@@ -107,7 +117,7 @@ async def test_an_unchanged_job_is_not_redrawn():
 async def test_the_same_job_is_only_watched_once():
     """Pressing Check again while a watcher runs must not start a second one racing it."""
     adapter = StubAdapter()
-    watcher = JobWatcher(adapter, client_returning(running(10)), 0.01)
+    watcher = JobWatcher(adapter, client_returning(running(10)), poll_seconds=0.01)
 
     first = watcher.watch(reference(), "a", "j1", USER)
     second = watcher.watch(reference(), "a", "j1", USER)
@@ -119,7 +129,7 @@ async def test_the_same_job_is_only_watched_once():
 @pytest.mark.asyncio
 async def test_a_card_with_no_activity_id_is_not_watched():
     """Nothing to edit, so a watcher would post duplicates instead."""
-    assert JobWatcher(StubAdapter(), client_returning(running(10)), 0).watch(
+    assert JobWatcher(StubAdapter(), client_returning(running(10)), poll_seconds=0).watch(
         reference(), "", "j1", USER
     ) is None
 
@@ -150,7 +160,7 @@ async def test_a_finished_run_is_shown_as_the_finished_course():
         base_url="http://backend", client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
 
-    await JobWatcher(adapter, client, 0).watch(reference(), "a", "j1", USER)
+    await JobWatcher(adapter, client, poll_seconds=0).watch(reference(), "a", "j1", USER)
 
     assert "Operators" in cards(adapter)
 
@@ -164,6 +174,44 @@ async def test_a_backend_that_falls_over_stops_the_watcher_quietly():
         client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
     )
 
-    await JobWatcher(adapter, client, 0).watch(reference(), "a", "j1", USER)
+    await JobWatcher(adapter, client, poll_seconds=0).watch(reference(), "a", "j1", USER)
 
     assert adapter.updated == []
+
+
+# --- the identity a continued turn needs ---------------------------------------------
+
+
+def test_an_unauthenticated_bot_continues_with_an_anonymous_identity():
+    """A stub adapter accepts anything, so it proved the polling and nothing about whether the
+    turn could be started at all. Measured against the real adapter: passing the reference's
+    bot id raises "Expected bot_id or claims_identity", and passing an app id with no secret
+    is refused by AAD. Only an anonymous identity reaches the wire."""
+    adapter = StubAdapter()
+    watcher = JobWatcher(adapter, client_returning(running(10)), poll_seconds=0)
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        watcher._show(reference(), "a", running(10), USER)
+    )
+
+    assert getattr(adapter.identities[0], "is_authenticated", None) is False
+
+
+def test_a_registered_bot_continues_as_itself():
+    adapter = StubAdapter()
+    watcher = JobWatcher(
+        adapter, client_returning(running(10)), app_id="the-app-id", poll_seconds=0
+    )
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        watcher._show(reference(), "a", running(10), USER)
+    )
+
+    assert adapter.identities[0] == "the-app-id"
+
+
+def test_the_poll_interval_cannot_be_passed_where_the_app_id_goes():
+    """They are two easily-swapped values, and a number in the app id slot would quietly take
+    the wrong authentication path rather than fail."""
+    with pytest.raises(TypeError):
+        JobWatcher(StubAdapter(), client_returning(running(10)), 0)

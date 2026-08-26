@@ -37,13 +37,10 @@ class LearnForgeBot(ActivityHandler):
             logger.exception("teams-bot: turn failed for %s", user_id)
             reply = Reply(text="Something went wrong reaching the course service. Try again.")
 
-        sent = await self._send(turn_context, reply)
-        if reply.watch_job and self._watcher and sent:
+        shown = await self._reply(turn_context, reply)
+        if reply.watch_job and self._watcher and shown:
             self._watcher.watch(
-                TurnContext.get_conversation_reference(activity),
-                sent.id,
-                reply.watch_job,
-                user_id,
+                TurnContext.get_conversation_reference(activity), shown, reply.watch_job, user_id
             )
 
     async def on_members_added_activity(self, members_added, turn_context: TurnContext) -> None:
@@ -51,11 +48,31 @@ class LearnForgeBot(ActivityHandler):
             if member.id != turn_context.activity.recipient.id:
                 await turn_context.send_activity(MessageFactory.text(HELP))
 
+    async def _reply(self, turn_context: TurnContext, reply: Reply) -> str | None:
+        """Returns the id of the message now showing this reply, which is what a later edit
+        needs.
+
+        A button press replaces the card it came from. Answering underneath leaves the pressed
+        card on screen still showing what was true before it was pressed, so a conversation
+        ends up as a column of stale progress bars.
+        """
+        activity = self._as_activity(reply)
+        pressed = turn_context.activity.reply_to_id if turn_context.activity.value else None
+        if pressed:
+            activity.id = pressed
+            try:
+                await turn_context.update_activity(activity)
+                return pressed
+            except Exception:
+                # Some channels refuse to edit; a reply underneath beats no reply at all.
+                logger.warning("teams-bot: could not edit %s, sending instead", pressed)
+                activity.id = None
+
+        sent = await turn_context.send_activity(activity)
+        return getattr(sent, "id", None)
+
     @staticmethod
-    async def _send(turn_context: TurnContext, reply: Reply):
-        """Returns the resource response, whose id is what a later edit needs to replace this
-        card rather than post another one under it."""
+    def _as_activity(reply: Reply):
         if reply.card:
-            attachment = CardFactory.adaptive_card(reply.card)
-            return await turn_context.send_activity(MessageFactory.attachment(attachment))
-        return await turn_context.send_activity(MessageFactory.text(reply.text))
+            return MessageFactory.attachment(CardFactory.adaptive_card(reply.card))
+        return MessageFactory.text(reply.text)

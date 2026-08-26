@@ -15,7 +15,8 @@ import logging
 from typing import Any
 
 from botbuilder.core import CardFactory, MessageFactory, TurnContext
-from botbuilder.schema import Activity, ActivityTypes, ConversationReference
+from botbuilder.schema import ActivityTypes, ConversationReference
+from botframework.connector.auth import ClaimsIdentity
 
 from teams_bot.adaptive_cards import progress_card
 from teams_bot.backend_client import BackendClient
@@ -32,9 +33,19 @@ MAX_POLLS = 300
 class JobWatcher:
     """Polls one run and edits its card in place until the run stops moving."""
 
-    def __init__(self, adapter: Any, client: BackendClient, poll_seconds: int = POLL_SECONDS):
+    def __init__(
+        self,
+        adapter: Any,
+        client: BackendClient,
+        *,
+        app_id: str = "",
+        poll_seconds: float = POLL_SECONDS,
+    ):
+        # Keyword-only: these are two easily-swapped values, and passing the poll interval as
+        # the app id would quietly take the wrong authentication path rather than fail.
         self._adapter = adapter
         self._client = client
+        self._app_id = app_id
         self._poll_seconds = poll_seconds
         self._watching: set[str] = set()
 
@@ -83,11 +94,25 @@ class JobWatcher:
             activity.type = ActivityTypes.message
             await turn_context.update_activity(activity)
 
-        await self._adapter.continue_conversation(reference, edit, reference.bot.id)
+        await self._continue(reference, edit)
+
+    async def _continue(self, reference: ConversationReference, callback: Any) -> None:
+        """Starting a turn of our own needs an identity, and which one depends on how the bot
+        is running. Measured against the real adapter: with no app id it refuses outright
+        ("Expected bot_id or claims_identity"), and given an app id with no secret it goes to
+        AAD for a token and is refused there. An anonymous identity is what gets a local bot
+        through to the wire.
+        """
+        if self._app_id:
+            await self._adapter.continue_conversation(reference, callback, bot_id=self._app_id)
+            return
+        await self._adapter.continue_conversation(
+            reference, callback, claims_identity=ClaimsIdentity({}, False)
+        )
 
 
 def still_running(job: dict) -> bool:
     return job.get("status") in UNFINISHED
 
 
-__all__ = ["JobWatcher", "still_running", "Activity"]
+__all__ = ["JobWatcher", "still_running"]
