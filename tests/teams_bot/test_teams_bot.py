@@ -153,6 +153,64 @@ def test_the_progress_bar_is_drawn_here_because_teams_has_none():
     assert progress_card.bar(100).count("░") == 0
 
 
+def test_the_building_card_does_not_repeat_the_confirmation_question():
+    """While a run waits, `detail` holds "I'll build a course on X. Shall I start?" — a
+    question this card has no yes to press, so it reads as being ignored."""
+    job = {
+        "job_id": "j1",
+        "status": "running",
+        "percent": 10,
+        "step": "subject-analysis",
+        "detail": "I'll build a course on Operator pattern. Shall I start?",
+    }
+
+    assert "Shall I start" not in json.dumps(progress_card.generating(job))
+
+
+def test_a_finished_course_can_be_opened_and_read():
+    """The whole point of generating it. Everything else on the card is about the course
+    rather than the course itself."""
+    summary = {
+        "course_id": COURSE,
+        "title": "T",
+        "percent": 0,
+        "next_chapter": 1,
+        "markdown_url": "https://blob/course.md?sig=x",
+        "chapters": [{"number": 1, "title": "One", "read": False, "best_quiz_percent": None}],
+    }
+
+    actions = progress_card.course_progress(summary)["actions"]
+
+    assert actions[0] == {
+        "type": "Action.OpenUrl",
+        "title": "Read the course",
+        "url": "https://blob/course.md?sig=x",
+    }
+
+
+def test_a_course_with_no_document_yet_offers_no_dead_button():
+    summary = {
+        "course_id": COURSE,
+        "title": "T",
+        "percent": 0,
+        "next_chapter": 1,
+        "markdown_url": None,
+        "chapters": [{"number": 1, "title": "One", "read": False, "best_quiz_percent": None}],
+    }
+
+    titles = [a["title"] for a in progress_card.course_progress(summary)["actions"]]
+
+    assert "Read the course" not in titles
+
+
+def test_the_ready_card_leads_with_reading_it():
+    actions = course_card.ready(
+        COURSE, {"title": "T", "chapters_total": 3, "markdown_url": "https://blob/c.md?sig=x"}
+    )["actions"]
+
+    assert actions[0]["type"] == "Action.OpenUrl"
+
+
 def test_a_finished_course_offers_the_next_thing_to_do():
     summary = {
         "course_id": COURSE,

@@ -24,4 +24,7 @@ class ProgressOut(BaseModel):
     chapters_total: int
     percent: int
     next_chapter: int | None = None
+    # Signed, and good for six days: the account has shared-key access disabled, so a read link
+    # is a user-delegation SAS and Azure caps that at seven.
+    markdown_url: str | None = None
     chapters: list[ChapterProgress]

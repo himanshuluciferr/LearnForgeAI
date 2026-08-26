@@ -33,3 +33,8 @@ def facts(pairs: list[tuple[str, str]]) -> dict[str, Any] | None:
 def action(title: str, data: dict[str, Any]) -> dict[str, Any]:
     """A card action carries structured data back, so no handler has to parse a button label."""
     return {"type": "Action.Submit", "title": title, "data": data}
+
+
+def link(title: str, url: str | None) -> dict[str, Any] | None:
+    """None when there is no url, so a course still being written offers no dead button."""
+    return {"type": "Action.OpenUrl", "title": title, "url": url} if url else None

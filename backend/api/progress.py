@@ -44,6 +44,7 @@ async def summarise(course: StoredCourse, user_id: str) -> ProgressOut:
     ]
     done = sum(1 for chapter in chapters if chapter.read)
     curriculum = course.state.curriculum
+    published = course.state.published
     return ProgressOut(
         course_id=course.id,
         title=curriculum.title if curriculum else "",
@@ -51,6 +52,7 @@ async def summarise(course: StoredCourse, user_id: str) -> ProgressOut:
         chapters_total=len(chapters),
         percent=round(100 * done / len(chapters)) if chapters else 0,
         next_chapter=next((c.number for c in chapters if not c.read), None),
+        markdown_url=published.markdown_url if published else None,
         chapters=chapters,
     )
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from teams_bot.adaptive_cards import action, card, facts, text
+from teams_bot.adaptive_cards import action, card, facts, link, text
 
 BAR_WIDTH = 20
 
@@ -25,12 +25,14 @@ def started(job: dict[str, Any], message: str) -> dict[str, Any]:
 
 
 def generating(job: dict[str, Any]) -> dict[str, Any]:
+    """`detail` is deliberately not shown. While the run waits it holds the confirmation
+    prompt — "Shall I start?" — which on this card has no yes to press and reads as a question
+    the learner is being ignored about."""
     step = (job.get("step") or "starting").replace("-", " ")
     return card(
         text("Building your course", size="large", weight="bolder"),
         text(bar(job.get("percent", 0))),
         text(f"Now: {step}"),
-        text(job.get("detail") or ""),
         actions=[action("Check again", {"command": "progress", "job_id": job.get("job_id")})],
     )
 
@@ -77,7 +79,7 @@ def course_progress(progress: dict[str, Any]) -> dict[str, Any]:
         lines.append(f"{mark} {chapter['number']}. {chapter['title']}{suffix}")
 
     next_chapter = progress.get("next_chapter")
-    actions = []
+    actions = [link("Read the course", progress.get("markdown_url"))]
     if next_chapter is not None:
         actions.append(
             action(
@@ -103,5 +105,5 @@ def course_progress(progress: dict[str, Any]) -> dict[str, Any]:
         text(progress.get("title") or "Your course", size="large", weight="bolder"),
         text(bar(progress.get("percent", 0))),
         text("\n\n".join(lines)),
-        actions=actions,
+        actions=[found for found in actions if found],
     )
