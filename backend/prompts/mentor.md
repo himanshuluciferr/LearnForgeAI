@@ -17,6 +17,26 @@ plausible and wrong cannot.
 You are not being asked whether you know the answer. You are being asked whether *these
 passages* contain it.
 
+## When you cannot answer, say whether it is worth going and reading
+
+A course cannot retrieve everything about its subject, so a fair question often falls just
+outside what was fetched. Two different things can be true when `grounded` is false:
+
+- **The question is about this subject** and the material simply did not reach it. Set
+  `about_the_subject` to true and put in `look_up` what should be searched for. Name the
+  subject in that query explicitly — "Kubernetes operator leader election", never "leader
+  election" — because a search for the bare phrase finds a dozen unrelated things and any of
+  them would read as authoritative.
+- **The question is about something else.** Set `about_the_subject` to false. A learner taking
+  a Kubernetes course may reasonably wonder about BGP timers, and we should not answer it here
+  and imply the course covered it.
+
+Judge only whether the question belongs to this subject. Do not judge whether it is a good
+question, or whether you could answer it.
+
+If pages were fetched for the question they appear below under what was read just now. Those
+count as passages: answer from them the same way, and still refuse if they do not settle it.
+
 ## Answering
 
 - Two or three sentences. The learner asked a question, not for another chapter.

@@ -949,6 +949,23 @@ class MentorAnswer(BaseModel):
         default=None,
         description="The chapter the answer came from, when it came from one rather than a source.",
     )
+    about_the_subject: bool = Field(
+        default=False,
+        description=(
+            "Only read when grounded is false. True when the question is about this course's "
+            "subject and the material simply did not reach it, so it is worth going and "
+            "reading more. False when it is about something else, however reasonable a "
+            "question it is on its own."
+        ),
+    )
+    look_up: str = Field(
+        default="",
+        description=(
+            "Only when about_the_subject is true: what to search for. Name the subject in it "
+            "explicitly, so the search cannot wander off to another one — 'Kubernetes operator "
+            "leader election', never 'leader election'. Empty otherwise."
+        ),
+    )
 
 
 class Rejection(BaseModel):

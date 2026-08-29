@@ -18,3 +18,6 @@ class MentorReply(BaseModel):
     # False when the course does not cover it, which is a real answer rather than a failure.
     grounded: bool
     chapter_number: int | None = None
+    # True when the answer came from pages read for this question rather than from the course.
+    # The learner is told, so they do not go looking for it in a chapter that never had it.
+    looked_up: bool = False

@@ -70,8 +70,14 @@ async def ask(command: Command, user_id: str, client: BackendClient) -> Reply:
         )
     reply = await client.ask(course["course_id"], user_id, command.text)
     chapter = reply.get("chapter_number")
-    where = f"\n\n_Chapter {chapter} covers this._" if chapter else ""
-    return Reply(text=f"{reply['answer']}{where}")
+    if chapter:
+        note = f"\n\n_Chapter {chapter} covers this._"
+    elif reply.get("looked_up"):
+        # Said plainly, or they go hunting for it in a chapter that never had it.
+        note = "\n\n_Not in your course — I read this up just now._"
+    else:
+        note = ""
+    return Reply(text=f"{reply['answer']}{note}")
 
 
 async def start(command: Command, user_id: str, client: BackendClient) -> Reply:

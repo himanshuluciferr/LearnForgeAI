@@ -15,6 +15,8 @@ BASE_URL = os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000")
 # Generation runs in the background, so no call here should ever be slow. A long timeout would
 # only turn a backend problem into a Teams turn that never answers.
 TIMEOUT = 20
+# The exception: a mentor question the course cannot answer is searched and fetched for.
+LOOKUP_TIMEOUT = 75
 
 
 class BackendClient:
@@ -45,11 +47,14 @@ class BackendClient:
         return await self._request("GET", "/jobs", params={"user_id": user_id, "limit": limit})
 
     async def ask(self, course_id: str, user_id: str, question: str) -> dict:
+        # Longer than the rest: a question the course does not cover sends the mentor off to
+        # search and fetch, and the default would time out on exactly the slow case.
         return await self._request(
             "POST",
             f"/mentor/{course_id}",
             params={"user_id": user_id},
             json={"question": question},
+            timeout=LOOKUP_TIMEOUT,
         )
 
     async def job_progress(self, job_id: str, user_id: str) -> dict:

@@ -28,4 +28,7 @@ async def ask(course_id: str, user_id: str, question: MentorQuestion) -> MentorR
         answer=answer.answer if answer.grounded else NOT_COVERED,
         grounded=answer.grounded,
         chapter_number=answer.chapter_number,
+        # Nothing read for this question came from a chapter, so a grounded answer with no
+        # chapter behind it is one we went and fetched.
+        looked_up=answer.grounded and answer.chapter_number is None and bool(answer.look_up),
     )

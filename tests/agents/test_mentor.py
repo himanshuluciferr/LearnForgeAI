@@ -8,6 +8,9 @@ other test here is about not letting a wrong answer through.
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 
 from backend.agents import mentor as mentor_module
@@ -25,6 +28,7 @@ from backend.workflow.state import (
     MentorAnswer,
     ResearchSource,
     ResourceKind,
+    SourceDocument,
 )
 
 
@@ -44,13 +48,18 @@ def make_state(chapters=None, research=None) -> CourseState:
     return state
 
 
-def answering(answer: MentorAnswer):
+def answering(*answers: MentorAnswer):
+    """Answers each call in turn, repeating the last. The lookup path makes two calls, and one
+    fixed answer cannot show what the second one did."""
+
     class StubAgent:
         def __init__(self) -> None:
             self.prompts: list[str] = []
+            self.remaining = list(answers)
 
         async def run(self, prompt: str):
             self.prompts.append(prompt)
+            answer = self.remaining.pop(0) if len(self.remaining) > 1 else self.remaining[0]
             return type("Response", (), {"value": answer})()
 
     return StubAgent()
@@ -58,8 +67,8 @@ def answering(answer: MentorAnswer):
 
 @pytest.fixture
 def agent(monkeypatch):
-    def install(answer: MentorAnswer):
-        stub = answering(answer)
+    def install(*answers: MentorAnswer):
+        stub = answering(*answers)
         monkeypatch.setattr(mentor_module, "get_mentor_agent", lambda: stub)
         return stub
 
@@ -192,3 +201,143 @@ def test_chapter_in_accepts_a_chapter_that_exists():
     state = make_state([chapter(3)])
 
     assert chapter_in(MentorAnswer(grounded=True, answer="a", chapter_number=3), state) == 3
+
+
+# --- going and reading more ----------------------------------------------------------
+
+
+@pytest.fixture
+def retrieval(monkeypatch):
+    """Stubs both halves of the lookup. Any test that reaches the network instead of these is
+    a test that will one day fail on a train."""
+    calls: list[str] = []
+
+    def install(pages: list[SourceDocument] | None = None, fails: Exception | None = None):
+        async def search(query: str, domains=None):
+            calls.append(query)
+            if fails:
+                raise fails
+            return [SimpleNamespace(url=page.url, title=page.title) for page in pages or []]
+
+        async def fetch(hits, limit):
+            return list(pages or [])[:limit]
+
+        monkeypatch.setattr(mentor_module, "search_web", search)
+        monkeypatch.setattr(mentor_module, "fetch_documents", fetch)
+        return calls
+
+    return install
+
+
+def page(text: str, url: str = "https://docs.example/a") -> SourceDocument:
+    return SourceDocument(title="A page", url=url, text=text)
+
+
+def wants_lookup(query: str = "Kubernetes operator leader election") -> MentorAnswer:
+    return MentorAnswer(grounded=False, answer="", about_the_subject=True, look_up=query)
+
+
+@pytest.mark.asyncio
+async def test_a_question_off_the_subject_is_never_searched_for(agent, retrieval):
+    """The junk-filling law: a search for BGP timers finds real, authoritative Cisco pages, and
+    answering from them would teach a Kubernetes learner networking and imply the course had
+    covered it."""
+    agent(MentorAnswer(grounded=False, answer="", about_the_subject=False, look_up=""))
+    calls = retrieval([page("anything at all " * 200)])
+
+    reply = await answer_question("how do I configure BGP timers?", make_state([chapter(1)]))
+
+    assert calls == [] and reply.grounded is False
+
+
+@pytest.mark.asyncio
+async def test_a_question_on_the_subject_sends_the_model_s_own_query(agent, retrieval):
+    """Named with the subject in it, so the search cannot wander to another one."""
+    agent(wants_lookup())
+    calls = retrieval([page("leader election uses a lease " * 100)])
+
+    await answer_question("how does leader election work?", make_state([chapter(1)]))
+
+    assert calls == ["Kubernetes operator leader election"]
+
+
+@pytest.mark.asyncio
+async def test_pages_that_do_not_settle_it_leave_the_refusal_standing(agent, retrieval):
+    """The second pass is grounded too, or reading more would just be a way of talking around
+    the refusal."""
+    agent(wants_lookup(), MentorAnswer(grounded=False, answer=""))
+    retrieval([page("something unrelated " * 200)])
+
+    reply = await answer_question("how does leader election work?", make_state([chapter(1)]))
+
+    assert reply.grounded is False
+
+
+@pytest.mark.asyncio
+async def test_what_was_read_reaches_the_second_call(agent, retrieval):
+    stub = agent(wants_lookup(), MentorAnswer(grounded=True, answer="A lease."))
+    retrieval([page("leader election holds a lease renewed every fifteen seconds " * 40)])
+
+    await answer_question("how does leader election work?", make_state([chapter(1)]))
+
+    assert len(stub.prompts) == 2 and "renewed every fifteen seconds" in stub.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_finding_nothing_to_read_leaves_the_refusal_standing(agent, retrieval):
+    agent(wants_lookup())
+    retrieval([])
+
+    reply = await answer_question("q?", make_state([chapter(1)]))
+
+    assert reply.grounded is False
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_falls_over_is_a_refusal_not_an_error(agent, retrieval):
+    """The learner asked a question; a stack trace is not an answer to it."""
+    agent(wants_lookup())
+    retrieval(fails=RuntimeError("provider down"))
+
+    reply = await answer_question("q?", make_state([chapter(1)]))
+
+    assert reply.grounded is False
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_never_returns_is_given_up_on(agent, retrieval, monkeypatch):
+    """A learner is waiting in a chat window, not polling a job."""
+    agent(wants_lookup())
+    retrieval([page("x " * 400)])
+    monkeypatch.setattr(mentor_module, "LOOKUP_SECONDS", 0)
+
+    async def crawl(query: str, domains=None):
+        await asyncio.sleep(5)
+        return []
+
+    monkeypatch.setattr(mentor_module, "search_web", crawl)
+
+    reply = await answer_question("q?", make_state([chapter(1)]))
+
+    assert reply.grounded is False
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_was_looked_up_names_no_chapter(agent, retrieval):
+    """It was not in a chapter, so sending the learner to re-read one would be a lie."""
+    agent(wants_lookup(), MentorAnswer(grounded=True, answer="A lease.", chapter_number=1))
+    retrieval([page("leader election uses a lease " * 100)])
+
+    reply = await answer_question("q?", make_state([chapter(1)]))
+
+    assert reply.grounded is True and reply.chapter_number is None
+
+
+@pytest.mark.asyncio
+async def test_lookup_can_be_turned_off_for_a_caller_that_cannot_wait(agent, retrieval):
+    agent(wants_lookup())
+    calls = retrieval([page("x " * 400)])
+
+    reply = await answer_question("q?", make_state([chapter(1)]), allow_lookup=False)
+
+    assert calls == [] and reply.grounded is False
