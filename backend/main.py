@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from backend.api import course, job, mentor, progress, quiz
 from backend.config.settings import get_settings
 from backend.services.blob_storage import close_blob_storage
+from backend.services.ai_search import close_search
 from backend.services.cosmos import close_cosmos
 
 # Without this our own logger.info calls are silent: uvicorn only configures its own loggers.
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # service with a cached connection belongs here the day it is written.
     await close_cosmos()
     await close_blob_storage()
+    await close_search()
 
 
 app = FastAPI(title="LearnForge AI", version="0.1.0", lifespan=lifespan)

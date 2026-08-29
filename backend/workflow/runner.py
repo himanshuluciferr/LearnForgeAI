@@ -9,6 +9,7 @@ from backend.models.course import StoredCourse
 from backend.models.job import JobStatus
 from backend.schemas.course import CourseRequest
 from backend.services.course_store import course_store
+from backend.services.course_index import index_course
 from backend.services.job_store import job_store
 from backend.workflow.state import (
     Clarification,
@@ -93,6 +94,9 @@ async def run_generation(
                 id=str(uuid4()), user_id=request.user_id, job_id=job_id, state=state
             )
         )
+        # After the save, and deliberately not before: an indexed course that was never stored
+        # would be searchable and unreadable. index_course swallows its own failures.
+        await index_course(course.id, request.user_id, state)
         await update(status=JobStatus.COMPLETED, percent=state.percent, course_id=course.id)
     except Exception as exc:
         # The failure is recorded on the job, so it must not escape the background task.

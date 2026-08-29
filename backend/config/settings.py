@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # instead of uploading it, so local runs need no storage account.
     blob_account_url: str = ""
 
+    # Empty means retrieval stays lexical, which is what the offline suite and any local run
+    # use. Set it and the mentor searches an index instead; the fallback is not a degraded
+    # mode but the measured default.
+    search_endpoint: str = ""
+    search_index: str = "course-passages"
+    # Vector search needs an embedding deployment, which is a second model on the Foundry
+    # account. Empty means the index is keyword-only and never asks for a vector.
+    embedding_deployment: str = ""
+    embedding_dimensions: int = 1536
+
 
 @lru_cache
 def get_settings() -> Settings:

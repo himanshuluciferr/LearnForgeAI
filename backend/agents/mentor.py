@@ -25,6 +25,7 @@ from backend.agents.research import classify
 from backend.prompts.loader import load_prompt
 from backend.services.foundry import get_chat_client
 from backend.services.page_fetch import fetch_documents
+from backend.services.retrieval import get_retriever
 from backend.services.web_search import search_web
 from backend.skills.passages.skill import passages_for
 from backend.workflow.state import (
@@ -81,11 +82,21 @@ def as_sources(chapters: list[Chapter]) -> list[ResearchSource]:
     ]
 
 
-def build_prompt(question: str, state: CourseState, extra: str = "") -> str:
+async def build_prompt(
+    question: str, state: CourseState, extra: str = "", where: dict[str, str] | None = None
+) -> str:
     """The course first, then what it was written from, then anything freshly read, then the
-    question — last, so a long corpus cannot push it out of sight."""
-    course = passages_for(as_sources(state.chapters), question, CHARS_PER_ANSWER)
-    sources = passages_for(state.research, question, CHARS_PER_ANSWER)
+    question — last, so a long corpus cannot push it out of sight.
+
+    Retrieval goes through the retriever rather than the selector directly, so an indexed
+    course is searched and any other falls back to scanning what we hold.
+    """
+    retriever = get_retriever()
+    keys = where or {}
+    course = await retriever.passages(
+        question, as_sources(state.chapters), CHARS_PER_ANSWER, **keys
+    )
+    sources = await retriever.passages(question, state.research, CHARS_PER_ANSWER, **keys)
     title = state.curriculum.title if state.curriculum else "this course"
     looked_up = f"\n\nRead just now, because the course did not cover it:\n{extra}" if extra else ""
     return (
@@ -131,7 +142,9 @@ async def read_more(query: str) -> list[ResearchSource]:
     ]
 
 
-async def look_up(answer: MentorAnswer, question: str, state: CourseState) -> MentorAnswer:
+async def look_up(
+    answer: MentorAnswer, question: str, state: CourseState, where: dict[str, str] | None = None
+) -> MentorAnswer:
     """Second pass over pages fetched for this question. Still grounded: if what came back does
     not answer it either, the refusal stands rather than being talked around."""
     try:
@@ -147,20 +160,24 @@ async def look_up(answer: MentorAnswer, question: str, state: CourseState) -> Me
         return settle(MentorAnswer(grounded=False), state)
 
     logger.info("mentor-agent: read %d page(s) for %r", len(fresh), answer.look_up[:60])
+    # Freshly fetched pages are not in the index, so they are always selected lexically.
     extra = passages_for(fresh, question, CHARS_PER_ANSWER)
-    response = await get_mentor_agent().run(build_prompt(question, state, extra))
+    response = await get_mentor_agent().run(await build_prompt(question, state, extra, where))
     return settle(response.value, state, looked_up=True)
 
 
 async def answer_question(
-    question: str, state: CourseState, allow_lookup: bool = True
+    question: str,
+    state: CourseState,
+    allow_lookup: bool = True,
+    where: dict[str, str] | None = None,
 ) -> MentorAnswer:
     if not question.strip():
         return MentorAnswer(grounded=False)
     if not state.chapters and not state.research:
         return MentorAnswer(grounded=False)
 
-    response = await get_mentor_agent().run(build_prompt(question, state))
+    response = await get_mentor_agent().run(await build_prompt(question, state, where=where))
     answer = settle(response.value, state)
     if answer.grounded:
         return answer
@@ -170,4 +187,4 @@ async def answer_question(
     if not (allow_lookup and answer.about_the_subject and answer.look_up.strip()):
         logger.info("mentor-agent: nothing in the course answered %r", question[:80])
         return answer
-    return await look_up(answer, question, state)
+    return await look_up(answer, question, state, where)

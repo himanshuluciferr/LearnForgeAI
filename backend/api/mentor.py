@@ -21,7 +21,11 @@ async def ask(course_id: str, user_id: str, question: MentorQuestion) -> MentorR
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
-    answer = await answer_question(question.question, course.state)
+    answer = await answer_question(
+        question.question,
+        course.state,
+        where={"course_id": course_id, "user_id": user_id},
+    )
     return MentorReply(
         course_id=course_id,
         question=question.question,
