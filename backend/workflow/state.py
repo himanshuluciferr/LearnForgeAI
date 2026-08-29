@@ -922,6 +922,35 @@ class PublishedCourse(BaseModel):
     docx_url: str | None = None
 
 
+class MentorAnswer(BaseModel):
+    """Response shape for mentor-agent.
+
+    `grounded` is the I-don't-know branch, and it is the whole safety of this node. A required
+    `answer: str` on its own is a demand for an answer, so a model asked about something the
+    course never covered returns its nearest recollection instead — the mechanism that once
+    produced twenty chapters on the wrong product.
+    """
+
+    grounded: bool = Field(
+        description=(
+            "True only if the passages you were given contain the answer. False when they do "
+            "not, however well you happen to know the subject yourself. Saying they do not is "
+            "the most useful answer you can give here."
+        )
+    )
+    answer: str = Field(
+        default="",
+        description=(
+            "Two or three sentences answering the question, drawn only from the passages. "
+            "Leave empty when grounded is false rather than answering from memory."
+        ),
+    )
+    chapter_number: int | None = Field(
+        default=None,
+        description="The chapter the answer came from, when it came from one rather than a source.",
+    )
+
+
 class Rejection(BaseModel):
     """Terminal result when the prompt was not a request to learn something."""
 

@@ -17,7 +17,8 @@ HELP = (
     "I build a course on anything you want to learn, then quiz you on it.\n\n"
     "- **teach me kubernetes operators** — start a course\n"
     "- **progress** — see how far you have got\n"
-    "- **quiz me** — take the next quiz\n\n"
+    "- **quiz me** — take the next quiz\n"
+    "- ask me anything about a course you are taking — I answer from what it actually says\n\n"
     "A course takes about twenty minutes to build. Ask for progress whenever you like."
 )
 
@@ -55,7 +56,22 @@ async def handle(text: str | None, user_id: str, client: BackendClient) -> Reply
         return await progress(user_id, client)
     if command.intent is Intent.QUIZ:
         return await quiz(command, user_id, client)
-    return Reply(text="I cannot answer questions about a course yet, but I can quiz you on one.")
+    return await ask(command, user_id, client)
+
+
+async def ask(command: Command, user_id: str, client: BackendClient) -> Reply:
+    """A question is about the course the learner has, so there is nothing to answer from
+    until they have one."""
+    course = await latest_course(client, user_id)
+    if course is None:
+        return Reply(
+            text="I answer questions about a course you are taking, and you have none yet. "
+            "Try **teach me kubernetes operators**."
+        )
+    reply = await client.ask(course["course_id"], user_id, command.text)
+    chapter = reply.get("chapter_number")
+    where = f"\n\n_Chapter {chapter} covers this._" if chapter else ""
+    return Reply(text=f"{reply['answer']}{where}")
 
 
 async def start(command: Command, user_id: str, client: BackendClient) -> Reply:
