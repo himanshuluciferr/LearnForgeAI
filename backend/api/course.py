@@ -7,7 +7,6 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
 from backend.api.deps import CurrentLearner
-from backend.models.course import StoredCourse
 from backend.models.job import GenerationJob, JobStatus
 from backend.schemas.course import (
     ChoiceRequest,
@@ -17,6 +16,7 @@ from backend.schemas.course import (
     JobProgress,
     NewCourse,
 )
+from backend.schemas.document import CourseDocument, as_document
 from backend.services.course_store import course_store
 from backend.services.job_store import job_store
 from backend.workflow.runner import run_generation
@@ -128,9 +128,9 @@ async def list_courses(learner: CurrentLearner, limit: int = 10) -> list[CourseS
 
 
 @router.get("/{course_id}")
-async def get_course(course_id: str, learner: CurrentLearner) -> StoredCourse:
+async def get_course(course_id: str, learner: CurrentLearner) -> CourseDocument:
     # Not found and not yours are the same answer, so an id cannot be confirmed by probing.
     course = await course_store.get(course_id, learner.user_id)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-    return course
+    return as_document(course)

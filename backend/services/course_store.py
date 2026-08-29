@@ -7,20 +7,59 @@ which also keeps every agent's output readable on disk during development.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
+from pydantic import ValidationError
 
 from backend.models.course import StoredCourse
 from backend.services.cosmos import COURSES, cosmos_enabled, get_container, to_document
+from backend.workflow.state import WorkflowStep
+
+logger = logging.getLogger(__name__)
 
 COURSES_DIR = Path(__file__).resolve().parents[2] / "generated_courses"
 
 # Cosmos refuses to ORDER BY a path its index policy excludes. Named so a test can check the
 # policy still covers it; the courses container also has a composite index on (user_id, this).
 ORDER_FIELD = "created_at"
+
+KNOWN_STEPS = {step.value for step in WorkflowStep}
+
+
+def repair(document: dict[str, Any]) -> None:
+    """Bring a course written by an earlier version up to the current shape.
+
+    Measured against the live container: 4 of 37 stored courses no longer validate, because
+    `research[].text` was once optional and `completed_steps` once held a step name that has
+    since been retired. Neither field is anything the reader sees, so refusing the whole
+    course over them loses a learner their library.
+
+    Repairs on read rather than relaxing the model, so the guarantees still hold on write.
+    """
+    state = document.get("state")
+    if not isinstance(state, dict):
+        return
+    for source in state.get("research") or []:
+        if isinstance(source, dict):
+            source.setdefault("text", "")
+    steps = state.get("completed_steps")
+    if isinstance(steps, list):
+        state["completed_steps"] = [step for step in steps if step in KNOWN_STEPS]
+
+
+def load(document: dict[str, Any]) -> StoredCourse | None:
+    """None rather than raising: one unreadable course must not fail a whole library."""
+    repair(document)
+    try:
+        return StoredCourse.model_validate(document)
+    except ValidationError:
+        logger.warning("course %s could not be read", document.get("id"), exc_info=True)
+        return None
 
 
 def _is_safe_id(course_id: str) -> bool:
@@ -67,7 +106,9 @@ class FileCourseStore:
         raw = await asyncio.to_thread(read)
         if raw is None:
             return None
-        course = StoredCourse.model_validate_json(raw)
+        course = load(json.loads(raw))
+        if course is None:
+            return None
         # Mirrors a Cosmos point read, which cannot reach into another user's partition.
         return None if user_id is not None and course.user_id != user_id else course
 
@@ -76,10 +117,11 @@ class FileCourseStore:
             found = []
             for path in self._dir.glob("*.json"):
                 try:
-                    course = StoredCourse.model_validate_json(path.read_text(encoding="utf-8"))
+                    document = json.loads(path.read_text(encoding="utf-8"))
                 except ValueError:
                     continue
-                if course.user_id == user_id:
+                course = load(document)
+                if course is not None and course.user_id == user_id:
                     found.append(course)
             return found
 
@@ -114,7 +156,7 @@ class CosmosCourseStore:
             if not found:
                 return None
             document = found[0]
-        return StoredCourse.model_validate(document)
+        return load(document)
 
     async def for_user(self, user_id: str, limit: int = 10) -> list[StoredCourse]:
         container = get_container(COURSES)
@@ -127,7 +169,9 @@ class CosmosCourseStore:
                 partition_key=user_id,
             )
         ]
-        return [StoredCourse.model_validate(item) for item in found]
+        # One unreadable course used to raise here and fail the whole listing, while the file
+        # store quietly skipped it.
+        return [course for course in map(load, found) if course is not None]
 
 
 course_store: CourseStore = CosmosCourseStore() if cosmos_enabled() else FileCourseStore()
