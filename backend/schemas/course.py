@@ -10,12 +10,18 @@ from backend.models.job import JobStatus
 from backend.workflow.state import WorkflowStep
 
 
-class CourseRequest(BaseModel):
-    """Raw Teams prompt. requirement-agent parses it into a LearningRequest."""
+class NewCourse(BaseModel):
+    """What the learner sends: a raw prompt. requirement-agent parses it into a LearningRequest."""
 
-    user_id: str
     prompt: str = Field(min_length=3, max_length=2000)
     language: str = "en"
+
+
+class CourseRequest(NewCourse):
+    """The same request once the server has attached who is asking. Split from NewCourse so
+    `user_id` cannot arrive from the client and name someone else."""
+
+    user_id: str
 
 
 class ChoiceRequest(BaseModel):

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
+from backend.api.deps import CurrentLearner
 from backend.models.course import StoredCourse
 from backend.models.job import GenerationJob, JobStatus
 from backend.schemas.course import (
@@ -15,6 +15,7 @@ from backend.schemas.course import (
     CourseSummary,
     JobAccepted,
     JobProgress,
+    NewCourse,
 )
 from backend.services.course_store import course_store
 from backend.services.job_store import job_store
@@ -24,16 +25,17 @@ router = APIRouter(prefix="/courses", tags=["course"])
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
-async def create_course(request: CourseRequest, tasks: BackgroundTasks) -> JobAccepted:
+async def create_course(
+    body: NewCourse, tasks: BackgroundTasks, learner: CurrentLearner
+) -> JobAccepted:
     """Generation takes minutes, so the job is queued and the caller polls for progress."""
-    job = GenerationJob(id=str(uuid4()), user_id=request.user_id, prompt=request.prompt)
+    request = CourseRequest(user_id=learner.user_id, prompt=body.prompt, language=body.language)
+    job = GenerationJob(id=str(uuid4()), user_id=learner.user_id, prompt=body.prompt)
     await job_store.create(job)
     tasks.add_task(run_generation, job.id, request)
-    # Every later call carries user_id: it both routes to the partition and authorises the read.
+    # The token authorises the poll: the url no longer carries who is asking.
     return JobAccepted(
-        job_id=job.id,
-        status=job.status,
-        status_url=f"/courses/{job.id}/progress?user_id={quote(request.user_id)}",
+        job_id=job.id, status=job.status, status_url=f"/courses/{job.id}/progress"
     )
 
 
@@ -41,11 +43,11 @@ async def create_course(request: CourseRequest, tasks: BackgroundTasks) -> JobAc
 async def confirm_subject(
     job_id: str,
     tasks: BackgroundTasks,
-    user_id: str,
+    learner: CurrentLearner,
     selection: ChoiceRequest | None = None,
 ) -> JobAccepted:
     """Answers a clarification or approves the identified subject."""
-    job = await job_store.get(job_id, user_id)
+    job = await job_store.get(job_id, learner.user_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
@@ -66,7 +68,7 @@ async def confirm_subject(
         return JobAccepted(
             job_id=job.id,
             status=JobStatus.RUNNING,
-            status_url=f"/courses/{job.id}/progress?user_id={quote(job.user_id)}",
+            status_url=f"/courses/{job.id}/progress",
         )
 
     if job.status is not JobStatus.NEEDS_CONFIRMATION:
@@ -87,13 +89,13 @@ async def confirm_subject(
     return JobAccepted(
         job_id=job.id,
         status=JobStatus.RUNNING,
-        status_url=f"/courses/{job.id}/progress?user_id={quote(job.user_id)}",
+        status_url=f"/courses/{job.id}/progress",
     )
 
 
 @router.get("/{job_id}/progress")
-async def get_progress(job_id: str, user_id: str) -> JobProgress:
-    job = await job_store.get(job_id, user_id)
+async def get_progress(job_id: str, learner: CurrentLearner) -> JobProgress:
+    job = await job_store.get(job_id, learner.user_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return JobProgress(
@@ -112,7 +114,7 @@ async def get_progress(job_id: str, user_id: str) -> JobProgress:
 
 
 @router.get("")
-async def list_courses(user_id: str, limit: int = 10) -> list[CourseSummary]:
+async def list_courses(learner: CurrentLearner, limit: int = 10) -> list[CourseSummary]:
     """Newest first, so a client can answer "which course am I on" without keeping state."""
     return [
         CourseSummary(
@@ -121,14 +123,14 @@ async def list_courses(user_id: str, limit: int = 10) -> list[CourseSummary]:
             chapters=len(course.state.chapters),
             created_at=course.created_at,
         )
-        for course in await course_store.for_user(user_id, limit)
+        for course in await course_store.for_user(learner.user_id, limit)
     ]
 
 
 @router.get("/{course_id}")
-async def get_course(course_id: str, user_id: str) -> StoredCourse:
+async def get_course(course_id: str, learner: CurrentLearner) -> StoredCourse:
     # Not found and not yours are the same answer, so an id cannot be confirmed by probing.
-    course = await course_store.get(course_id, user_id)
+    course = await course_store.get(course_id, learner.user_id)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from backend.api import course, job, mentor, progress, quiz
+from backend.api import auth, course, job, mentor, progress, quiz
 from backend.config.settings import get_settings
 from backend.services.blob_storage import close_blob_storage
 from backend.services.ai_search import close_search
@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="LearnForge AI", version="0.1.0", lifespan=lifespan)
 
+app.include_router(auth.router)
 app.include_router(course.router)
 app.include_router(job.router)
 app.include_router(mentor.router)

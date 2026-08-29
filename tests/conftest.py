@@ -15,6 +15,16 @@ os.environ["BLOB_ACCOUNT_URL"] = ""
 import pytest  # noqa: E402
 
 from backend.agents import fanout  # noqa: E402
+from backend.services.security import create_token  # noqa: E402
+
+
+def as_user(user_id: str) -> dict[str, str]:
+    """The header a signed-in learner sends.
+
+    Tests call the API the way the app does, through a real signed token, rather than by
+    overriding the dependency: the token path is the thing that has to work.
+    """
+    return {"Authorization": f"Bearer {create_token(user_id, user_id)}"}
 
 
 @pytest.fixture(autouse=True)

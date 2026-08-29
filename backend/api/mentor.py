@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 
 from backend.agents.mentor import NOT_COVERED, answer_question
+from backend.api.deps import CurrentLearner
 from backend.schemas.mentor import MentorQuestion, MentorReply
 from backend.services.course_store import course_store
 
@@ -16,15 +17,17 @@ router = APIRouter(prefix="/mentor", tags=["mentor"])
 
 
 @router.post("/{course_id}")
-async def ask(course_id: str, user_id: str, question: MentorQuestion) -> MentorReply:
-    course = await course_store.get(course_id, user_id)
+async def ask(
+    course_id: str, question: MentorQuestion, learner: CurrentLearner
+) -> MentorReply:
+    course = await course_store.get(course_id, learner.user_id)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
     answer = await answer_question(
         question.question,
         course.state,
-        where={"course_id": course_id, "user_id": user_id},
+        where={"course_id": course_id, "user_id": learner.user_id},
     )
     return MentorReply(
         course_id=course_id,

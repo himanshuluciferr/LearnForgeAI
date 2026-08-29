@@ -4,6 +4,9 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 python-multipart
+# Session tokens. Passwords use hashlib.scrypt from the standard library, so there is no
+# hashing dependency to keep current.
+pyjwt
 
 # --- Orchestration ---
 # Only the core runtime plus the Foundry client; the `agent-framework` umbrella

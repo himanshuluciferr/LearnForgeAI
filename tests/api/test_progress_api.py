@@ -19,11 +19,14 @@ from backend.services.course_store import FileCourseStore
 from backend.services.progress_store import InMemoryProgressStore
 from backend.services.quiz_store import InMemoryQuizStore
 from backend.workflow.state import Chapter, CourseState, Curriculum
+from tests.conftest import as_user
 
 client = TestClient(app)
 
 USER = "priya@contoso.com"
 COURSE = "22222222-2222-4222-8222-222222222222"
+MINE = as_user(USER)
+THEIRS = as_user("mallory")
 
 
 def chapter(number: int) -> Chapter:
@@ -51,9 +54,7 @@ def stores(monkeypatch, tmp_path):
 
 
 def read(number: int) -> dict:
-    return client.put(
-        f"/progress/{COURSE}/chapters/{number}", params={"user_id": USER}
-    ).json()
+    return client.put(f"/progress/{COURSE}/chapters/{number}", headers=MINE).json()
 
 
 # --- what a learner sees -------------------------------------------------------------
@@ -63,7 +64,7 @@ def read(number: int) -> dict:
 async def test_a_new_course_starts_at_nothing_read(stores):
     await stores.courses.save(stored_course())
 
-    body = client.get(f"/progress/{COURSE}", params={"user_id": USER}).json()
+    body = client.get(f"/progress/{COURSE}", headers=MINE).json()
 
     assert body["chapters_read"] == 0 and body["percent"] == 0
     assert body["next_chapter"] == 1 and body["title"] == "A Course"
@@ -113,7 +114,7 @@ async def test_reading_a_chapter_twice_is_not_an_error(stores):
 async def test_a_chapter_the_course_does_not_have_is_a_404(stores):
     await stores.courses.save(stored_course(2))
 
-    response = client.put(f"/progress/{COURSE}/chapters/9", params={"user_id": USER})
+    response = client.put(f"/progress/{COURSE}/chapters/9", headers=MINE)
 
     assert response.status_code == 404
 
@@ -132,7 +133,7 @@ async def test_the_best_quiz_score_is_shown_against_its_chapter(stores):
             )
         )
 
-    chapters = client.get(f"/progress/{COURSE}", params={"user_id": USER}).json()["chapters"]
+    chapters = client.get(f"/progress/{COURSE}", headers=MINE).json()["chapters"]
 
     assert chapters[0]["best_quiz_percent"] == 90
     assert chapters[1]["best_quiz_percent"] is None
@@ -148,7 +149,7 @@ async def test_a_zero_score_is_a_score_not_a_missing_one(stores):
         )
     )
 
-    chapters = client.get(f"/progress/{COURSE}", params={"user_id": USER}).json()["chapters"]
+    chapters = client.get(f"/progress/{COURSE}", headers=MINE).json()["chapters"]
 
     assert chapters[0]["best_quiz_percent"] == 0
 
@@ -160,11 +161,12 @@ async def test_a_zero_score_is_a_score_not_a_missing_one(stores):
 async def test_another_learners_course_is_not_found(stores):
     await stores.courses.save(stored_course())
 
-    assert client.get(f"/progress/{COURSE}", params={"user_id": "mallory"}).status_code == 404
+    assert client.get(f"/progress/{COURSE}", headers=THEIRS).status_code == 404
 
 
 def test_progress_cannot_be_read_without_a_learner():
-    assert client.get(f"/progress/{COURSE}").status_code == 422
+    """401 rather than the old 422: an anonymous caller is not a malformed request."""
+    assert client.get(f"/progress/{COURSE}").status_code == 401
 
 
 @pytest.mark.asyncio
@@ -175,6 +177,6 @@ async def test_one_learners_progress_is_not_anothers(stores):
     )
 
     read(1)
-    theirs = client.get(f"/progress/{COURSE}", params={"user_id": "mallory"}).json()
+    theirs = client.get(f"/progress/{COURSE}", headers=THEIRS).json()
 
     assert theirs["chapters_read"] == 0

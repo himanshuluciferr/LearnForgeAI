@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     embedding_deployment: str = ""
     embedding_dimensions: int = 1536
 
+    # Empty generates one per process, so sessions do not survive a restart. Deliberate: a
+    # default in source would be the same signing key on every deployment.
+    jwt_secret: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 
+from backend.api.deps import CurrentLearner
 from backend.models.quiz import QuizAttempt
 from backend.schemas.quiz import (
     AnswerSubmission,
@@ -55,8 +56,10 @@ async def load_quiz(course_id: str, user_id: str, chapter: int | None) -> Quiz:
 
 
 @router.get("/{course_id}")
-async def get_quiz(course_id: str, user_id: str, chapter: int | None = None) -> QuizOut:
-    quiz = await load_quiz(course_id, user_id, chapter)
+async def get_quiz(
+    course_id: str, learner: CurrentLearner, chapter: int | None = None
+) -> QuizOut:
+    quiz = await load_quiz(course_id, learner.user_id, chapter)
     return QuizOut(
         course_id=course_id,
         scope=quiz.scope,
@@ -70,8 +73,12 @@ async def get_quiz(course_id: str, user_id: str, chapter: int | None = None) -> 
 
 @router.post("/{course_id}/answers", status_code=status.HTTP_201_CREATED)
 async def submit_answers(
-    course_id: str, user_id: str, submission: AnswerSubmission, chapter: int | None = None
+    course_id: str,
+    submission: AnswerSubmission,
+    learner: CurrentLearner,
+    chapter: int | None = None,
 ) -> QuizResult:
+    user_id = learner.user_id
     quiz = await load_quiz(course_id, user_id, chapter)
     for number, choice in submission.answers.items():
         question = quiz.questions[number - 1] if 1 <= number <= len(quiz.questions) else None

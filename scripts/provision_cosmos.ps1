@@ -65,6 +65,7 @@ $containers = @(
     @{ Name = "progress";     Index = "jobs-index.json";    Ttl = -1 }
     @{ Name = "quiz_results"; Index = "jobs-index.json";    Ttl = -1 }
     @{ Name = "chat_history"; Index = "jobs-index.json";    Ttl = 7776000 } # 90 days of mentor chat
+    @{ Name = "users";        Index = "jobs-index.json";    Ttl = -1 }      # accounts never expire
 )
 
 Write-Host "3/5 Containers..." -ForegroundColor Cyan

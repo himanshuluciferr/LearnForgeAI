@@ -18,11 +18,14 @@ from backend.models.quiz import QuizAttempt
 from backend.services.course_store import FileCourseStore
 from backend.services.quiz_store import InMemoryQuizStore
 from backend.workflow.state import CourseState, Quiz, QuizQuestion
+from tests.conftest import as_user
 
 client = TestClient(app)
 
 USER = "priya@contoso.com"
 COURSE = "11111111-1111-4111-8111-111111111111"
+MINE = as_user(USER)
+THEIRS = as_user("mallory")
 
 
 def question(text: str, correct: int) -> QuizQuestion:
@@ -68,7 +71,7 @@ async def test_the_answer_is_never_sent_to_the_learner(stores):
     """A quiz that ships its own answer key is not an assessment."""
     await save(stores, chapter_quiz())
 
-    body = client.get(f"/quiz/{COURSE}", params={"user_id": USER, "chapter": 1}).json()
+    body = client.get(f"/quiz/{COURSE}", params={"chapter": 1}, headers=MINE).json()
 
     assert "correct_index" not in str(body)
     assert body["questions"][0]["options"] == ["alpha", "bravo", "charlie"]
@@ -78,7 +81,7 @@ async def test_the_answer_is_never_sent_to_the_learner(stores):
 async def test_questions_are_numbered_from_one(stores):
     await save(stores, chapter_quiz())
 
-    body = client.get(f"/quiz/{COURSE}", params={"user_id": USER, "chapter": 1}).json()
+    body = client.get(f"/quiz/{COURSE}", params={"chapter": 1}, headers=MINE).json()
 
     assert [q["number"] for q in body["questions"]] == [1, 2]
 
@@ -88,7 +91,7 @@ async def test_asking_for_no_chapter_gets_the_final_assessment(stores):
     """None is a real value here, not a missing one."""
     await save(stores, chapter_quiz(), final_quiz())
 
-    body = client.get(f"/quiz/{COURSE}", params={"user_id": USER}).json()
+    body = client.get(f"/quiz/{COURSE}", headers=MINE).json()
 
     assert body["scope"] == "Final" and body["chapter_number"] is None
 
@@ -97,20 +100,23 @@ async def test_asking_for_no_chapter_gets_the_final_assessment(stores):
 async def test_a_chapter_with_no_quiz_is_a_404(stores):
     await save(stores, chapter_quiz())
 
-    assert client.get(f"/quiz/{COURSE}", params={"user_id": USER, "chapter": 9}).status_code == 404
+    assert (
+        client.get(f"/quiz/{COURSE}", params={"chapter": 9}, headers=MINE).status_code == 404
+    )
 
 
 @pytest.mark.asyncio
 async def test_someone_elses_course_is_not_found(stores):
     await save(stores, chapter_quiz())
 
-    response = client.get(f"/quiz/{COURSE}", params={"user_id": "mallory", "chapter": 1})
+    response = client.get(f"/quiz/{COURSE}", params={"chapter": 1}, headers=THEIRS)
 
     assert response.status_code == 404
 
 
 def test_a_quiz_cannot_be_read_without_a_learner():
-    assert client.get(f"/quiz/{COURSE}").status_code == 422
+    """401 rather than the old 422: an anonymous caller is not a malformed request."""
+    assert client.get(f"/quiz/{COURSE}").status_code == 401
 
 
 # --- marking -------------------------------------------------------------------------
@@ -122,7 +128,8 @@ async def test_the_score_is_computed_here_not_taken_from_the_client(stores):
 
     body = client.post(
         f"/quiz/{COURSE}/answers",
-        params={"user_id": USER, "chapter": 1},
+        params={"chapter": 1},
+        headers=MINE,
         json={"answers": {"1": 1, "2": 0}, "percent": 0, "correct": 0},
     ).json()
 
@@ -134,7 +141,10 @@ async def test_a_wrong_answer_comes_back_with_its_explanation(stores):
     await save(stores, chapter_quiz())
 
     body = client.post(
-        f"/quiz/{COURSE}/answers", params={"user_id": USER, "chapter": 1}, json={"answers": {"1": 0}}
+        f"/quiz/{COURSE}/answers",
+        params={"chapter": 1},
+        headers=MINE,
+        json={"answers": {"1": 0}},
     ).json()
 
     first = body["answers"][0]
@@ -147,7 +157,10 @@ async def test_an_unanswered_question_is_marked_wrong_not_dropped(stores):
     await save(stores, chapter_quiz())
 
     body = client.post(
-        f"/quiz/{COURSE}/answers", params={"user_id": USER, "chapter": 1}, json={"answers": {"1": 1}}
+        f"/quiz/{COURSE}/answers",
+        params={"chapter": 1},
+        headers=MINE,
+        json={"answers": {"1": 1}},
     ).json()
 
     assert body["total"] == 2 and body["correct"] == 1 and body["percent"] == 50
@@ -159,7 +172,10 @@ async def test_an_option_that_does_not_exist_is_refused(stores):
     await save(stores, chapter_quiz())
 
     response = client.post(
-        f"/quiz/{COURSE}/answers", params={"user_id": USER, "chapter": 1}, json={"answers": {"1": 7}}
+        f"/quiz/{COURSE}/answers",
+        params={"chapter": 1},
+        headers=MINE,
+        json={"answers": {"1": 7}},
     )
 
     assert response.status_code == 422
@@ -170,7 +186,10 @@ async def test_an_answer_to_a_question_that_does_not_exist_is_refused(stores):
     await save(stores, chapter_quiz())
 
     response = client.post(
-        f"/quiz/{COURSE}/answers", params={"user_id": USER, "chapter": 1}, json={"answers": {"9": 0}}
+        f"/quiz/{COURSE}/answers",
+        params={"chapter": 1},
+        headers=MINE,
+        json={"answers": {"9": 0}},
     )
 
     assert response.status_code == 422
@@ -181,7 +200,10 @@ async def test_the_attempt_is_kept(stores):
     await save(stores, chapter_quiz())
 
     client.post(
-        f"/quiz/{COURSE}/answers", params={"user_id": USER, "chapter": 1}, json={"answers": {"1": 1}}
+        f"/quiz/{COURSE}/answers",
+        params={"chapter": 1},
+        headers=MINE,
+        json={"answers": {"1": 1}},
     )
 
     kept = await stores.attempts.for_course(COURSE, USER)

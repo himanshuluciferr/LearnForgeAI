@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from backend.api.deps import CurrentLearner
 from backend.schemas.course import JobProgress
 from backend.services.job_store import job_store
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/jobs", tags=["job"])
 
 
 @router.get("")
-async def list_jobs(user_id: str, limit: int = 5) -> list[JobProgress]:
+async def list_jobs(learner: CurrentLearner, limit: int = 5) -> list[JobProgress]:
     """Most recently touched first, so a client can find the run it is waiting on without
     having kept the id."""
     return [
@@ -32,5 +33,5 @@ async def list_jobs(user_id: str, limit: int = 5) -> list[JobProgress]:
             error=job.error,
             course_id=job.course_id,
         )
-        for job in await job_store.for_user(user_id, limit)
+        for job in await job_store.for_user(learner.user_id, limit)
     ]

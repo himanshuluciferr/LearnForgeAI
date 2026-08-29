@@ -20,6 +20,7 @@ JOBS = "jobs"
 COURSES = "courses"
 QUIZ_RESULTS = "quiz_results"
 PROGRESS = "progress"
+USERS = "users"
 
 
 def to_document(model: BaseModel) -> dict[str, Any]:

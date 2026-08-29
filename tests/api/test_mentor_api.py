@@ -17,11 +17,14 @@ from backend.workflow.state import Chapter, CourseState, Curriculum, MentorAnswe
 from teams_bot.backend_client import BackendClient
 from teams_bot.commands import Intent, read
 from teams_bot.handlers import message_handler
+from tests.conftest import as_user
 
 client = TestClient(app)
 
 USER = "priya@contoso.com"
 COURSE = "33333333-3333-4333-8333-333333333333"
+MINE = as_user(USER)
+THEIRS = as_user("mallory")
 
 
 def stored_course() -> StoredCourse:
@@ -55,7 +58,7 @@ async def test_a_grounded_answer_comes_back_with_its_chapter(store, monkeypatch)
     answering(MentorAnswer(grounded=True, answer="It reconciles.", chapter_number=1), monkeypatch)
 
     body = client.post(
-        f"/mentor/{COURSE}", params={"user_id": USER}, json={"question": "what is a controller?"}
+        f"/mentor/{COURSE}", headers=MINE, json={"question": "what is a controller?"}
     ).json()
 
     assert body["grounded"] is True and body["chapter_number"] == 1
@@ -69,7 +72,7 @@ async def test_what_the_course_does_not_cover_is_said_plainly(store, monkeypatch
     answering(MentorAnswer(grounded=False, answer=""), monkeypatch)
 
     body = client.post(
-        f"/mentor/{COURSE}", params={"user_id": USER}, json={"question": "what is a mesh?"}
+        f"/mentor/{COURSE}", headers=MINE, json={"question": "what is a mesh?"}
     ).json()
 
     assert body["grounded"] is False and "does not cover that" in body["answer"]
@@ -80,21 +83,22 @@ async def test_another_learners_course_cannot_be_asked_about(store):
     await store.save(stored_course())
 
     response = client.post(
-        f"/mentor/{COURSE}", params={"user_id": "mallory"}, json={"question": "anything?"}
+        f"/mentor/{COURSE}", headers=THEIRS, json={"question": "anything?"}
     )
 
     assert response.status_code == 404
 
 
 def test_a_question_needs_a_learner():
-    assert client.post(f"/mentor/{COURSE}", json={"question": "anything?"}).status_code == 422
+    """401 rather than the old 422: an anonymous caller is not a malformed request."""
+    assert client.post(f"/mentor/{COURSE}", json={"question": "anything?"}).status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_an_empty_question_is_refused_by_the_schema(store):
     await store.save(stored_course())
 
-    response = client.post(f"/mentor/{COURSE}", params={"user_id": USER}, json={"question": " "})
+    response = client.post(f"/mentor/{COURSE}", headers=MINE, json={"question": " "})
 
     assert response.status_code == 422
 

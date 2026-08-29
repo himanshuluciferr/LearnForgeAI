@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
+from backend.api.deps import CurrentLearner
 from backend.models.course import StoredCourse
 from backend.models.progress import CourseProgress
 from backend.schemas.progress import ChapterProgress, ProgressOut
@@ -58,13 +59,17 @@ async def summarise(course: StoredCourse, user_id: str) -> ProgressOut:
 
 
 @router.get("/{course_id}")
-async def get_progress(course_id: str, user_id: str) -> ProgressOut:
-    return await summarise(await load_course(course_id, user_id), user_id)
+async def get_progress(course_id: str, learner: CurrentLearner) -> ProgressOut:
+    course = await load_course(course_id, learner.user_id)
+    return await summarise(course, learner.user_id)
 
 
 @router.put("/{course_id}/chapters/{number}")
-async def mark_chapter_read(course_id: str, number: int, user_id: str) -> ProgressOut:
+async def mark_chapter_read(
+    course_id: str, number: int, learner: CurrentLearner
+) -> ProgressOut:
     """Idempotent: finishing a chapter twice is something a learner does, not an error."""
+    user_id = learner.user_id
     course = await load_course(course_id, user_id)
     if not any(chapter.number == number for chapter in course.state.chapters):
         raise HTTPException(
