@@ -11,6 +11,9 @@ import os
 # Any new endpoint setting must be added here the day it lands in .env.
 os.environ["COSMOS_ENDPOINT"] = ""
 os.environ["BLOB_ACCOUNT_URL"] = ""
+# Fixed, so the suite neither signs with the real key nor changes behaviour depending on
+# whether a developer happens to have a .env.
+os.environ["JWT_SECRET"] = "test-signing-key-not-used-anywhere-real"
 
 import pytest  # noqa: E402
 
