@@ -34,14 +34,13 @@ function Invoke-Az {
     if ($LASTEXITCODE -ne 0) { throw "az $($args -join ' ') failed with $LASTEXITCODE" }
 }
 
-function Test-AzResource {
-    param([string[]]$Args)
-    $previous = $ErrorActionPreference
+function Test-AzResource([string[]]$ShowArgs) {
+    # $Args is an automatic variable, so naming the parameter that silently binds nothing and
+    # every check returns "already exists". az writes to stderr when a resource is missing,
+    # which EAP=Stop would turn into a throw.
     $ErrorActionPreference = "Continue"
-    & az @Args 2>$null | Out-Null
-    $found = $LASTEXITCODE -eq 0
-    $ErrorActionPreference = $previous
-    return $found
+    az @ShowArgs 2>&1 | Out-Null
+    return $LASTEXITCODE -eq 0
 }
 
 Write-Host "1/4 Search service..." -ForegroundColor Cyan
