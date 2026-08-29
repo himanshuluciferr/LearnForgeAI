@@ -19,19 +19,4 @@ router = APIRouter(prefix="/jobs", tags=["job"])
 async def list_jobs(learner: CurrentLearner, limit: int = 5) -> list[JobProgress]:
     """Most recently touched first, so a client can find the run it is waiting on without
     having kept the id."""
-    return [
-        JobProgress(
-            job_id=job.id,
-            status=job.status,
-            step=job.step,
-            percent=job.percent,
-            detail=job.detail,
-            options=job.options,
-            subject_name=job.subject_name,
-            subject_description=job.subject_description,
-            subject_sources=job.subject_sources,
-            error=job.error,
-            course_id=job.course_id,
-        )
-        for job in await job_store.for_user(learner.user_id, limit)
-    ]
+    return [JobProgress.of(job) for job in await job_store.for_user(learner.user_id, limit)]

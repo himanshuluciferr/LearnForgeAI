@@ -34,3 +34,8 @@ class Learner(BaseModel):
     user_id: str
     email: str
     name: str = ""
+
+
+class StreamTicket(BaseModel):
+    ticket: str
+    expires_in: int

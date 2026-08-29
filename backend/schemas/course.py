@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.models.job import JobStatus
+from backend.models.job import GenerationJob, JobStatus
 from backend.workflow.state import WorkflowStep
 
 
@@ -62,3 +62,19 @@ class JobProgress(BaseModel):
     error: str | None = None
     # Set once the course is saved; this is how a poller finds the result.
     course_id: str | None = None
+
+    @classmethod
+    def of(cls, job: GenerationJob) -> "JobProgress":
+        return cls(
+            job_id=job.id,
+            status=job.status,
+            step=job.step,
+            percent=job.percent,
+            detail=job.detail,
+            options=job.options,
+            subject_name=job.subject_name,
+            subject_description=job.subject_description,
+            subject_sources=job.subject_sources,
+            error=job.error,
+            course_id=job.course_id,
+        )

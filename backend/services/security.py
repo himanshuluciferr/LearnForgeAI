@@ -27,6 +27,14 @@ logger = logging.getLogger(__name__)
 ALGORITHM = "HS256"
 TOKEN_DAYS = 7
 
+# A ticket rides in the query string because EventSource cannot set a header, and anything in
+# a url reaches logs, history and referrers. Sixty seconds is long enough to open a stream and
+# far too short to be worth stealing.
+TICKET_SECONDS = 60
+
+SESSION = "session"
+STREAM = "stream"
+
 # OWASP's floor for scrypt. n is the memory/CPU cost and is the number that matters.
 SCRYPT_N = 2**14
 SCRYPT_R = 8
@@ -106,6 +114,7 @@ def create_token(user_id: str, email: str, name: str = "") -> str:
             # Carried so the app can greet the learner without a second call. A rename would
             # need a fresh token, which is a fair trade for one fewer round trip.
             "name": name,
+            "typ": SESSION,
             "iat": now,
             "exp": now + timedelta(days=TOKEN_DAYS),
         },
@@ -114,11 +123,30 @@ def create_token(user_id: str, email: str, name: str = "") -> str:
     )
 
 
-def read_token(token: str) -> dict | None:
+def create_stream_ticket(user_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": user_id,
+            "typ": STREAM,
+            "iat": now,
+            "exp": now + timedelta(seconds=TICKET_SECONDS),
+        },
+        _secret(),
+        algorithm=ALGORITHM,
+    )
+
+
+def read_token(token: str, expect: str = SESSION) -> dict | None:
     """None rather than an exception: an unreadable token and an expired one are the same
-    answer to the caller, which is 401."""
+    answer to the caller, which is 401.
+
+    `expect` is what stops a ticket being a session. Without it the short-lived thing we put
+    in a url would open every endpoint, which is the opposite of the point.
+    """
     try:
         # algorithms= is not optional. Without it a token claiming alg=none would be accepted.
-        return jwt.decode(token, _secret(), algorithms=[ALGORITHM])
+        claims = jwt.decode(token, _secret(), algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None
+    return claims if claims.get("typ") == expect else None

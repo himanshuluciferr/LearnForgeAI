@@ -12,8 +12,15 @@ from fastapi import APIRouter, HTTPException, status
 
 from backend.api.deps import CurrentLearner
 from backend.models.user import User
-from backend.schemas.auth import Credentials, Learner, Session, SignUp
-from backend.services.security import create_token, hash_password, user_id_for, verify_password
+from backend.schemas.auth import Credentials, Learner, Session, SignUp, StreamTicket
+from backend.services.security import (
+    TICKET_SECONDS,
+    create_stream_ticket,
+    create_token,
+    hash_password,
+    user_id_for,
+    verify_password,
+)
 from backend.services.user_store import user_store
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,3 +76,11 @@ async def login(request: Credentials) -> Session:
 async def me(learner: CurrentLearner) -> Learner:
     """Lets the app tell a live session from an expired one without guessing at the token."""
     return learner
+
+
+@router.post("/stream-ticket")
+async def stream_ticket(learner: CurrentLearner) -> StreamTicket:
+    """Traded for the session token because EventSource cannot send a header."""
+    return StreamTicket(
+        ticket=create_stream_ticket(learner.user_id), expires_in=TICKET_SECONDS
+    )

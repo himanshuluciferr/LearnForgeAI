@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.schemas.auth import Learner
-from backend.services.security import read_token
+from backend.services.security import STREAM, read_token
 
 # auto_error=False so a missing header is answered here with the same 401 as a bad one, rather
 # than a 403 from the security scheme.
@@ -26,12 +26,8 @@ UNAUTHENTICATED = HTTPException(
 )
 
 
-def current_learner(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
-) -> Learner:
-    if credentials is None:
-        raise UNAUTHENTICATED
-    claims = read_token(credentials.credentials)
+def learner_from(token: str, expect: str) -> Learner:
+    claims = read_token(token, expect=expect)
     if not claims or not claims.get("sub"):
         raise UNAUTHENTICATED
     return Learner(
@@ -39,6 +35,23 @@ def current_learner(
     )
 
 
+def current_learner(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+) -> Learner:
+    if credentials is None:
+        raise UNAUTHENTICATED
+    return learner_from(credentials.credentials, expect="session")
+
+
+def ticket_holder(ticket: str = "") -> Learner:
+    """For EventSource, which cannot set a header. Only ever accepts a stream ticket, so the
+    thing in the url is useless anywhere else."""
+    if not ticket:
+        raise UNAUTHENTICATED
+    return learner_from(ticket, expect=STREAM)
+
+
 # One alias, so a route says who is asking in the same way everywhere and cannot accidentally
 # declare the learner as a plain parameter the client could set.
 CurrentLearner = Annotated[Learner, Depends(current_learner)]
+TicketHolder = Annotated[Learner, Depends(ticket_holder)]

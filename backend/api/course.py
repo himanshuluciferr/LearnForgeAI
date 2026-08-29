@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
-from backend.api.deps import CurrentLearner
+from backend.api.deps import CurrentLearner, TicketHolder
+from backend.api.stream import stream_response
 from backend.models.job import GenerationJob, JobStatus
 from backend.schemas.course import (
     ChoiceRequest,
@@ -98,19 +100,16 @@ async def get_progress(job_id: str, learner: CurrentLearner) -> JobProgress:
     job = await job_store.get(job_id, learner.user_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return JobProgress(
-        job_id=job.id,
-        status=job.status,
-        step=job.step,
-        percent=job.percent,
-        detail=job.detail,
-        options=job.options,
-        subject_name=job.subject_name,
-        subject_description=job.subject_description,
-        subject_sources=job.subject_sources,
-        error=job.error,
-        course_id=job.course_id,
-    )
+    return JobProgress.of(job)
+
+
+@router.get("/{job_id}/stream")
+async def stream_progress(
+    job_id: str, request: Request, learner: TicketHolder
+) -> StreamingResponse:
+    """Same progress as the poll, pushed as it happens. Authorised by a short-lived ticket
+    because EventSource cannot send a header."""
+    return stream_response(request, job_id, learner.user_id)
 
 
 @router.get("")

@@ -14,8 +14,9 @@ from fastapi.security.base import SecurityBase
 from fastapi.testclient import TestClient
 
 from backend.api import auth as auth_api
-from backend.api.deps import CurrentLearner
+from backend.api.deps import CurrentLearner, ticket_holder
 from backend.main import app
+from backend.services.security import create_stream_ticket, create_token, read_token
 from backend.services.user_store import InMemoryUserStore
 
 client = TestClient(app)
@@ -149,6 +150,40 @@ def test_me_refuses_anything_that_is_not_a_valid_token(headers):
     assert client.get("/auth/me", headers=headers).status_code == 401
 
 
+# --- stream tickets ------------------------------------------------------------------
+
+
+def test_a_ticket_is_issued_to_a_signed_in_learner():
+    token = signup()["token"]
+
+    body = client.post("/auth/stream-ticket", headers={"Authorization": f"Bearer {token}"})
+
+    assert body.status_code == 200
+    assert body.json()["expires_in"] == 60
+
+
+def test_a_ticket_cannot_be_had_without_signing_in():
+    assert client.post("/auth/stream-ticket").status_code == 401
+
+
+def test_a_ticket_is_not_a_session():
+    """It travels in a url, where it reaches logs and history. If it opened the rest of the
+    API it would be a session token written down in public."""
+    ticket = create_stream_ticket("user-1")
+
+    assert client.get("/auth/me", headers={"Authorization": f"Bearer {ticket}"}).status_code == 401
+    assert read_token(ticket, expect="session") is None
+    assert read_token(ticket, expect="stream") is not None
+
+
+def test_a_session_is_not_a_ticket():
+    """The other direction: a long-lived token must not be usable in a query string just
+    because the stream accepts one there."""
+    session = create_token("user-1", "ada@example.com")
+
+    assert read_token(session, expect="stream") is None
+
+
 def api_routes(router) -> list[APIRoute]:
     """Included routers are kept nested rather than flattened onto `app.routes`, so walking
     the top level alone finds only /health. The first version of these guards did exactly
@@ -164,6 +199,10 @@ def api_routes(router) -> list[APIRoute]:
 
 def is_secured(dependant) -> bool:
     if isinstance(getattr(dependant, "call", None), SecurityBase):
+        return True
+    # The stream is authorised by a ticket rather than a header, because EventSource cannot
+    # send one. It is still authentication, so it counts here.
+    if getattr(dependant, "call", None) is ticket_holder:
         return True
     return any(is_secured(child) for child in dependant.dependencies)
 
