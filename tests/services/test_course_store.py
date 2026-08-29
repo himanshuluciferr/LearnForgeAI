@@ -7,8 +7,17 @@ import pytest
 from pydantic import ValidationError
 
 from backend.models.course import StoredCourse
-from backend.services.course_store import FileCourseStore, load, repair
-from backend.workflow.state import CourseState, LearningRequest, WorkflowStep
+from backend.schemas.document import as_document
+from backend.services.course_store import FileCourseStore, as_stored, load, repair
+from backend.workflow.state import (
+    Chapter,
+    CourseState,
+    Curriculum,
+    LearningRequest,
+    Quiz,
+    QuizQuestion,
+    WorkflowStep,
+)
 
 
 def make_course(user_id: str = "u1") -> StoredCourse:
@@ -105,3 +114,103 @@ async def test_a_listing_skips_an_unreadable_course_and_keeps_the_rest(tmp_path)
     (tmp_path / "notjson.json").write_text("{{{", encoding="utf-8")
 
     assert len(await store.for_user("u1")) == 1
+
+# --- the projected read used for display ----------------------------------------------
+
+
+def projected_row(course: StoredCourse, quiz_chapters: list, quiz_count: int) -> dict:
+    """What the display query returns: the reader's fields, and quizzes as numbers only."""
+    document = json.loads(course.model_dump_json())
+    state = document["state"]
+    return {
+        "id": document["id"],
+        "user_id": document["user_id"],
+        "job_id": document["job_id"],
+        "created_at": document["created_at"],
+        "curriculum": state["curriculum"],
+        "chapters": state["chapters"],
+        "practice": state["practice"],
+        "projects": state["projects"],
+        "published": state["published"],
+        "quiz_chapters": quiz_chapters,
+        "quiz_count": quiz_count,
+    }
+
+
+def course_with_quizzes() -> StoredCourse:
+    course = make_course()
+    course.state.curriculum = Curriculum(title="A Course", summary="s", chapters=[])
+    course.state.chapters = [Chapter(number=1, title="One", body_markdown="body")]
+    course.state.quizzes = [
+        Quiz(scope="Chapter 1", chapter_number=1, questions=[]),
+        Quiz(scope="Final", chapter_number=None, questions=[]),
+    ]
+    return course
+
+
+def test_a_projected_row_reads_back_as_the_same_document():
+    """The display read must not become a second, drifting definition of a course."""
+    course = course_with_quizzes()
+
+    rebuilt = load(as_stored(projected_row(course, [1], 2)))
+
+    assert rebuilt is not None
+    assert as_document(rebuilt).model_dump_json() == as_document(course).model_dump_json()
+
+
+def test_the_final_quiz_survives_cosmos_dropping_its_null():
+    """A final quiz has no chapter number, and the array projection omits it rather than
+    returning null, so it is restored from the count."""
+    rebuilt = load(as_stored(projected_row(course_with_quizzes(), [1], 2)))
+
+    assert rebuilt is not None
+    assert as_document(rebuilt).has_final_quiz is True
+
+
+def test_a_course_with_no_final_quiz_does_not_grow_one():
+    course = course_with_quizzes()
+    course.state.quizzes = [Quiz(scope="Chapter 1", chapter_number=1, questions=[])]
+
+    rebuilt = load(as_stored(projected_row(course, [1], 1)))
+
+    assert rebuilt is not None
+    assert as_document(rebuilt).has_final_quiz is False
+
+
+def test_the_projection_carries_no_quiz_questions():
+    """The whole reason the display read exists: the answer key is 15% of the bytes and the
+    page must never receive it."""
+    course = course_with_quizzes()
+    course.state.quizzes[0].questions = [
+        QuizQuestion(question="q", options=["a", "b"], correct_index=1, explanation="e")
+    ]
+
+    rebuilt = load(as_stored(projected_row(course, [1], 2)))
+
+    assert rebuilt is not None
+    assert all(quiz.questions == [] for quiz in rebuilt.state.quizzes)
+
+
+def test_a_course_that_never_finished_projects_without_raising():
+    """Nulls everywhere: a job can fail before a curriculum exists."""
+    row = {
+        "id": "c1",
+        "user_id": "u1",
+        "job_id": "j1",
+        "created_at": "2026-01-01T00:00:00Z",
+        "quiz_count": 0,
+    }
+
+    rebuilt = load(as_stored(row))
+
+    assert rebuilt is not None and rebuilt.state.chapters == []
+
+
+@pytest.mark.asyncio
+async def test_the_file_store_summarises_the_same_way_the_query_does(tmp_path):
+    store = FileCourseStore(tmp_path)
+    await store.save(course_with_quizzes())
+
+    rows = await store.summaries("u1")
+
+    assert rows[0]["title"] == "A Course" and rows[0]["chapters"] == 1

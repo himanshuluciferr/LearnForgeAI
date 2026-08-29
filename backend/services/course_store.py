@@ -30,6 +30,59 @@ ORDER_FIELD = "created_at"
 
 KNOWN_STEPS = {step.value for step in WorkflowStep}
 
+# What a reader needs, and nothing else. Measured on a 20-chapter course: the stored document
+# is 609 KB, of which the reviewer's verdicts and the quiz answer keys are 206 KB that the
+# page never shows. The account is in East US and a course is large, so bytes not asked for
+# are seconds not waited for.
+DISPLAY_FIELDS = """
+    c.id, c.user_id, c.job_id, c.created_at,
+    c.state.curriculum, c.state.chapters, c.state.practice,
+    c.state.projects, c.state.published,
+    ARRAY(SELECT VALUE q.chapter_number FROM q IN c.state.quizzes) AS quiz_chapters,
+    ARRAY_LENGTH(c.state.quizzes) AS quiz_count
+"""
+
+# The library shows a title and a chapter count. Reading whole courses to render that was
+# hundreds of kilobytes per row.
+SUMMARY_FIELDS = """
+    c.id, c.created_at, c.state.curriculum.title,
+    ARRAY_LENGTH(c.state.chapters) AS chapters
+"""
+
+
+def as_stored(row: dict[str, Any]) -> dict[str, Any]:
+    """Reshapes a projected row back into the stored shape.
+
+    Rebuilding the document rather than parsing the projection separately keeps one path
+    into `StoredCourse`, so the display read cannot drift from the full one. Quizzes come
+    back as their chapter numbers alone, which is all the page is told.
+    """
+    quizzes = [
+        {"scope": "", "chapter_number": number, "questions": []}
+        for number in row.get("quiz_chapters") or []
+    ]
+    # A final quiz has no chapter number, and Cosmos drops it from the array rather than
+    # returning a null, so it is restored from the count.
+    if len(quizzes) < (row.get("quiz_count") or 0):
+        quizzes.append({"scope": "", "chapter_number": None, "questions": []})
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "job_id": row["job_id"],
+        "created_at": row["created_at"],
+        "state": {
+            "job_id": row["job_id"],
+            "user_id": row["user_id"],
+            "prompt": "",
+            "curriculum": row.get("curriculum"),
+            "chapters": row.get("chapters") or [],
+            "practice": row.get("practice") or [],
+            "projects": row.get("projects") or [],
+            "published": row.get("published"),
+            "quizzes": quizzes,
+        },
+    }
+
 
 def repair(document: dict[str, Any]) -> None:
     """Bring a course written by an earlier version up to the current shape.
@@ -77,6 +130,10 @@ class CourseStore(Protocol):
     async def get(self, course_id: str, user_id: str | None = None) -> StoredCourse | None: ...
 
     async def for_user(self, user_id: str, limit: int = 10) -> list[StoredCourse]: ...
+
+    async def for_display(self, course_id: str, user_id: str) -> StoredCourse | None: ...
+
+    async def summaries(self, user_id: str, limit: int = 10) -> list[dict[str, Any]]: ...
 
 
 class FileCourseStore:
@@ -129,6 +186,21 @@ class FileCourseStore:
         courses.sort(key=lambda course: course.created_at, reverse=True)
         return courses[:limit]
 
+    async def for_display(self, course_id: str, user_id: str) -> StoredCourse | None:
+        """No projection to make locally: reading the file already cost the whole file."""
+        return await self.get(course_id, user_id)
+
+    async def summaries(self, user_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": course.id,
+                "created_at": course.created_at,
+                "title": course.state.curriculum.title if course.state.curriculum else "",
+                "chapters": len(course.state.chapters),
+            }
+            for course in await self.for_user(user_id, limit)
+        ]
+
 
 class CosmosCourseStore:
     """Partitioned by user_id, matching jobs, so one learner's data lives on one partition."""
@@ -172,6 +244,28 @@ class CosmosCourseStore:
         # One unreadable course used to raise here and fail the whole listing, while the file
         # store quietly skipped it.
         return [course for course in map(load, found) if course is not None]
+
+    async def for_display(self, course_id: str, user_id: str) -> StoredCourse | None:
+        found = [
+            item
+            async for item in get_container(COURSES).query_items(
+                f"SELECT {DISPLAY_FIELDS} FROM c WHERE c.id = @id",  # noqa: S608 - fixed text
+                parameters=[{"name": "@id", "value": course_id}],
+                partition_key=user_id,
+            )
+        ]
+        return load(as_stored(found[0])) if found else None
+
+    async def summaries(self, user_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        return [
+            item
+            async for item in get_container(COURSES).query_items(
+                f"SELECT {SUMMARY_FIELDS} FROM c ORDER BY c.{ORDER_FIELD} DESC "  # noqa: S608
+                "OFFSET 0 LIMIT @limit",
+                parameters=[{"name": "@limit", "value": limit}],
+                partition_key=user_id,
+            )
+        ]
 
 
 course_store: CourseStore = CosmosCourseStore() if cosmos_enabled() else FileCourseStore()

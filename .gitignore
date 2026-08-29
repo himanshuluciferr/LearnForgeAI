@@ -22,3 +22,7 @@ run*.txt
 learnforge-teams-app.zip
 teams_app/color.png
 teams_app/outline.png
+
+node_modules/
+# Build output: `npm run build` in frontend/ writes the app here for FastAPI to serve.
+backend/static/

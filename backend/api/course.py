@@ -117,19 +117,19 @@ async def list_courses(learner: CurrentLearner, limit: int = 10) -> list[CourseS
     """Newest first, so a client can answer "which course am I on" without keeping state."""
     return [
         CourseSummary(
-            course_id=course.id,
-            title=course.state.curriculum.title if course.state.curriculum else "",
-            chapters=len(course.state.chapters),
-            created_at=course.created_at,
+            course_id=row["id"],
+            title=row.get("title") or "",
+            chapters=row.get("chapters") or 0,
+            created_at=row["created_at"],
         )
-        for course in await course_store.for_user(learner.user_id, limit)
+        for row in await course_store.summaries(learner.user_id, limit)
     ]
 
 
 @router.get("/{course_id}")
 async def get_course(course_id: str, learner: CurrentLearner) -> CourseDocument:
     # Not found and not yours are the same answer, so an id cannot be confirmed by probing.
-    course = await course_store.get(course_id, learner.user_id)
+    course = await course_store.for_display(course_id, learner.user_id)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return as_document(course)

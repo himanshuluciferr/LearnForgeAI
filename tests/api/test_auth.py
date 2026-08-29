@@ -235,7 +235,9 @@ def test_no_route_lets_the_caller_say_who_they_are():
 def test_every_learner_route_is_behind_the_token():
     """A new endpoint that forgets the dependency is an open door, and the only reliable way
     to notice is to ask each route what it requires."""
-    public = {"/health", "/auth/signup", "/auth/login"}
+    # The last is the SPA shell: static HTML with no learner data in it. Everything the page
+    # then asks for is authenticated, which the tests below pin.
+    public = {"/health", "/auth/signup", "/auth/login", "/{path:path}"}
     open_doors = [
         route.path
         for route in api_routes(app)
