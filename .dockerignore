@@ -1,0 +1,26 @@
+# Without this, `COPY frontend/ ./` sends node_modules and the local build output into the
+# image, which is slow and lets a stale local build win over the one the image just made.
+node_modules/
+frontend/node_modules/
+backend/static/
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+.git/
+.github/
+.vscode/
+.idea/
+
+# Secrets never belong in an image layer.
+.env
+*.local
+
+generated_courses/
+probe_e2e.md
+run*.txt
+tests/
+docs/

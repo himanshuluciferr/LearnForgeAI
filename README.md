@@ -1,19 +1,17 @@
 # LearnForge AI
 
-AI-powered personalized course generation, delivered inside Microsoft Teams.
+AI-powered personalized course generation, delivered as a web app.
 
-A user asks `@LearnForge Teach me Azure AI Search` and the system researches, plans, writes,
-reviews and publishes a complete course — then stays available as an AI mentor grounded
-in that generated course.
+A learner asks for a subject and the system researches, plans, writes, reviews and publishes a
+complete course — a book they can read chapter by chapter, take quizzes on, and question. The
+mentor answers from that course, or says it does not cover the question.
 
 ## Architecture
 
 ```
-Microsoft Teams
+React app                (library, reader, quiz, mentor)
       |
-Microsoft 365 Agent      (auth, adaptive cards)
-      |
-FastAPI Backend          (REST, persistence)
+FastAPI Backend          (REST, auth, persistence — also serves the built app)
       |
 Agent Framework Workflow (state + routing only)
       |
@@ -32,19 +30,20 @@ executors connected by edges.
 
 | Layer | Role |
 | --- | --- |
-| `teams-bot/` | Teams interaction only — no AI logic |
+| `frontend/` | React app — no AI logic |
 | `backend/api/` | REST endpoints |
 | `backend/agents/` | `ChatAgent` definitions — instructions and tool wiring |
 | `backend/workflow/` | Orchestration only — decides *what* runs next |
 | `backend/skills/` | Reusable capabilities exposed to agents as tools |
 | `backend/prompts/` | Centralized prompt templates |
 | `backend/services/` | Thin Azure wrappers — swappable and mockable |
+| `teams_bot/` | Parked. Predates authentication and does not currently work. |
 
 ## Workflow
 
 ```
-requirement -> skill-analysis -> research -> curriculum -> chapter
-   -> practice -> project -> quiz -> review -> publisher
+requirement -> subject-analysis -> research -> curriculum -> chapter
+   -> review -> practice -> project -> quiz -> publisher
 ```
 
 `review` is the conditional edge: a quality score below threshold loops back for
@@ -53,10 +52,6 @@ regeneration instead of publishing. `mentor` runs on a separate post-generation 
 > Agent names must be alphanumeric with interior hyphens only — no underscores,
 > max 63 characters. Foundry rejects anything else.
 
-## Status
-
-Scaffold only. No implementation, no Azure resources provisioned yet.
-
 ## Getting started
 
 ```powershell
@@ -64,5 +59,23 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
+
+# The app is served by the API, so it has to be built first.
+cd frontend; npm ci; npm run build; cd ..
+
 uvicorn backend.main:app --reload
+```
+
+Then open <http://127.0.0.1:8000>.
+
+For frontend work, `npm run dev` in `frontend/` serves on 5173 and proxies the API, so the
+paths match production.
+
+## Checks
+
+```powershell
+pytest -m "not live"        # offline suite
+pytest -m live              # calls the real model; costs money
+cd frontend; npm test
+python scripts\e2e_smoke.py # generates a real course against a running server
 ```

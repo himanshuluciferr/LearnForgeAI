@@ -9,9 +9,12 @@ It also answers the subject confirmation itself, since a real run now stops to a
 """
 
 import asyncio
+import json
+import secrets
 import sys
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 
@@ -27,7 +30,7 @@ from backend.agents import research as research_agent  # noqa: E402
 from backend.agents import review as review_agent  # noqa: E402
 from backend.agents.chapter import CHARS_PER_TOPIC  # noqa: E402
 from backend.agents.practice import WORDS_PER_SOLUTION  # noqa: E402
-from backend.models.course import StoredCourse  # noqa: E402
+from backend.services.course_store import course_store  # noqa: E402
 from backend.skills.exporter.skill import render_course  # noqa: E402
 from backend.skills.passages.skill import head_of, passages_for, render, terms  # noqa: E402
 from backend.workflow.state import MAX_REVISIONS  # noqa: E402
@@ -35,7 +38,11 @@ from backend.workflow.state import MAX_REVISIONS  # noqa: E402
 sys.stdout.reconfigure(encoding="utf-8")
 
 BASE = "http://127.0.0.1:8000"
-USER = "e2e-publisher-user"
+
+# A fresh account per run. No password in source, and no run inheriting the last one's
+# courses. The id is printed at the end so the rows can be found and removed.
+EMAIL = f"e2e-{uuid4().hex[:10]}@learnforge.local"
+PASSWORD = secrets.token_urlsafe(24)
 
 # Overridable because git rebase is something the model knows cold, so a grounded course and a
 # recalled one look identical. Pass a subject it does not know to tell them apart.
@@ -56,7 +63,7 @@ async def watch(api: httpx.AsyncClient, job_id: str) -> dict:
     last = None
     confirmed = False
     while True:
-        progress = (await api.get(f"/courses/{job_id}/progress", params={"user_id": USER})).json()
+        progress = (await api.get(f"/courses/{job_id}/progress")).json()
         marker = (progress["step"], progress["percent"], progress["status"])
         if marker != last:
             last = marker
@@ -68,7 +75,7 @@ async def watch(api: httpx.AsyncClient, job_id: str) -> dict:
             for url in progress["subject_sources"]:
                 print(f"    read {url}", flush=True)
             # The one thing a human would do here, so the rest of the run can be exercised.
-            answered = await api.post(f"/courses/{job_id}/confirm", params={"user_id": USER})
+            answered = await api.post(f"/courses/{job_id}/confirm")
             answered.raise_for_status()
             confirmed = True
             print("  confirmed, generating", flush=True)
@@ -344,10 +351,15 @@ async def main():
     prompt = " ".join(sys.argv[1:]) or DEFAULT_PROMPT
     print(f"prompt: {prompt}", flush=True)
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as api:
-        accepted = await api.post(
-            "/courses",
-            json={"user_id": USER, "prompt": prompt},
+        session = await api.post(
+            "/auth/signup", json={"email": EMAIL, "password": PASSWORD, "name": "E2E"}
         )
+        session.raise_for_status()
+        user_id = session.json()["user_id"]
+        api.headers["Authorization"] = f"Bearer {session.json()['token']}"
+        print(f"account {EMAIL} ({user_id})", flush=True)
+
+        accepted = await api.post("/courses", json={"prompt": prompt})
         accepted.raise_for_status()
         job_id = accepted.json()["job_id"]
         print(f"job {job_id}", flush=True)
@@ -359,11 +371,22 @@ async def main():
                 print("error:", progress["error"], flush=True)
             return
 
-        course = (
-            await api.get(f"/courses/{progress['course_id']}", params={"user_id": USER})
-        ).json()
+        # What the app itself receives. Worth checking against a real course rather than a
+        # fixture, because the fixture cannot get the projection wrong.
+        document = (await api.get(f"/courses/{progress['course_id']}")).json()
+        served = json.dumps(document)
+        print(
+            f"document: {len(served):,} chars, {len(document['chapters'])} chapters, "
+            f"answer key present: {'correct_index' in served}",
+            flush=True,
+        )
 
-    state = StoredCourse.model_validate(course).state
+    # Straight from the store, not the API: /courses/{id} returns what a reader may see, which
+    # deliberately excludes the research corpus and the reviewer's verdicts. Those are most of
+    # what this script exists to report on.
+    stored = await course_store.get(progress["course_id"], user_id)
+    assert stored is not None, "the course the job reported was not in the store"
+    state = stored.state
     published = state.published
     subject = state.subject
     assert published is not None and subject is not None and state.curriculum is not None
@@ -409,6 +432,7 @@ async def main():
     with open("probe_e2e.md", "w", encoding="utf-8") as handle:
         handle.write(signed.text)
     print("saved probe_e2e.md", flush=True)
+    print(f"\nthis run's rows belong to {user_id} ({EMAIL})", flush=True)
 
 
 # Guarded because without it, merely importing this module generates a whole course.

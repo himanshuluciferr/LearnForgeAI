@@ -9,6 +9,9 @@ services:
       - .env
     volumes:
       - ./backend:/app/backend
+      # Keeps the bundle the image built. Without this the source mount above hides it, and a
+      # clone that has never run `npm run build` serves no app at all.
+      - /app/backend/static
       - ./generated_courses:/app/generated_courses
 
   teams-bot:

@@ -68,3 +68,12 @@ if STATIC.is_dir():
         if path.split("/")[0] in API_PREFIXES:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
         return FileResponse(STATIC / "index.html")
+
+else:
+    # Said out loud, because the API works perfectly well without the app and a container that
+    # silently serves nothing at / is a confusing thing to debug.
+    logging.getLogger(__name__).warning(
+        "no built app at %s: the API will answer but there is no site to open. "
+        "Run `npm run build` in frontend/",
+        STATIC,
+    )
