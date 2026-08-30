@@ -90,10 +90,13 @@ async def test_a_short_reply_is_refused_rather_than_misaligned(monkeypatch):
         await embeddings.embed(["a", "b", "c"])
 
 
-def test_the_index_is_built_to_the_same_width_the_embedder_produces():
-    """Two settings that must agree, read from one place so they cannot drift."""
-    from backend.services.ai_search import index_definition  # noqa: PLC0415
+def test_the_index_is_built_to_the_same_width_the_embedder_produces(monkeypatch):
+    """Two settings that must agree. Vectors are only in the index when a deployment is
+    configured, so the test says so itself rather than depending on a developer's .env - the
+    first version of this passed locally and failed everywhere else."""
+    from backend.services import ai_search  # noqa: PLC0415
 
-    fields = {field.name: field for field in index_definition().fields}
+    monkeypatch.setattr(ai_search, "vectors_enabled", lambda: True)
+    fields = {field.name: field for field in ai_search.index_definition().fields}
 
     assert fields["vector"].vector_search_dimensions == get_settings().embedding_dimensions
