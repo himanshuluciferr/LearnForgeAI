@@ -21,7 +21,10 @@ router = APIRouter(prefix="/progress", tags=["progress"])
 
 
 async def load_course(course_id: str, user_id: str) -> StoredCourse:
-    course = await course_store.get(course_id, user_id)
+    # The projected read: progress needs chapter numbers, titles and the published link, and
+    # was pulling the whole 618 KB state to count them. Opening a course did that alongside
+    # the document read, so a reader paid for the course twice.
+    course = await course_store.for_display(course_id, user_id)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { Chapter, CourseDocument, CourseProgress } from "../api/types";
 import { ChapterWindow } from "./ChapterWindow";
+import { CourseSkeleton } from "../ui/Skeleton";
 import { Mentor } from "./Mentor";
 
 export function CourseReader() {
@@ -21,7 +22,7 @@ export function CourseReader() {
   }, [courseId]);
 
   if (error) return <p className="error page">{error}</p>;
-  if (!course) return <p className="muted page">Loading…</p>;
+  if (!course) return <CourseSkeleton />;
 
   const readState = new Map(progress?.chapters.map((c) => [c.number, c]) ?? []);
 

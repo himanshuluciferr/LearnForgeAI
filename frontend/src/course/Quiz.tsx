@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { QuizSkeleton } from "../ui/Skeleton";
 import type { QuizOut, QuizResult } from "../api/types";
 
 interface Props {
@@ -40,7 +41,7 @@ export function Quiz({ courseId, chapter, onClose }: Props) {
         </header>
 
         {error && <p className="error">{error}</p>}
-        {!quiz && !error && <p className="muted">Loading…</p>}
+        {!quiz && !error && <QuizSkeleton />}
 
         {quiz && !result && (
           <>

@@ -395,8 +395,7 @@ button.link {
 
 .mentor {
   margin-top: 2.5rem;
-}
-.chat {
+}.chat {
   display: grid;
   gap: 1rem;
   margin: 1rem 0;
@@ -407,4 +406,59 @@ button.link {
 .answered {
   border-left: 3px solid var(--accent);
   padding-left: 0.9rem;
+}
+
+/* --- waiting ----------------------------------------------------------------------- */
+
+.shimmer {
+  display: block;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--line) 25%, #f5f5f4 50%, var(--line) 75%);
+  background-size: 200% 100%;
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Someone who has asked not to be shown movement is still owed the shape of the page. */
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+  }
+}
+
+.skeleton {
+  display: flex;
+  gap: 0.6rem;
+  pointer-events: none;
+}
+
+.book.skeleton {
+  display: grid;
+  align-content: start;
+  gap: 0.6rem;
+  border-left-color: var(--line);
+}
+
+.chapter-row.skeleton {
+  align-items: center;
+}
+
+.question.skeleton {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.9rem;
+}
+
+.stack {
+  display: grid;
+  gap: 0.6rem;
+  margin: 1rem 0 1.5rem;
 }

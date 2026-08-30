@@ -180,3 +180,15 @@ async def test_one_learners_progress_is_not_anothers(stores):
     theirs = client.get(f"/progress/{COURSE}", headers=THEIRS).json()
 
     assert theirs["chapters_read"] == 0
+
+def test_progress_reads_the_projection_not_the_whole_course():
+    """Opening a course did a 405 KB projected read for the document and a 618 KB full read
+    for progress, so the reader paid for the course twice."""
+    import inspect  # noqa: PLC0415
+
+    from backend.api import progress as progress_api  # noqa: PLC0415
+
+    body = inspect.getsource(progress_api.load_course)
+
+    assert "for_display" in body
+    assert "course_store.get" not in body

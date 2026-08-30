@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { FINISHED } from "../api/useJobProgress";
 import type { CourseSummary } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { LibrarySkeleton } from "../ui/Skeleton";
 import { Generating } from "./Generating";
 
 export function Library() {
@@ -84,7 +85,7 @@ export function Library() {
       )}
 
       <h2 className="section">Your library</h2>
-      {courses === null && <p className="muted">Loading…</p>}
+      {courses === null && <LibrarySkeleton />}
       {courses?.length === 0 && (
         <p className="muted">Nothing yet. Ask for something above and it will appear here.</p>
       )}

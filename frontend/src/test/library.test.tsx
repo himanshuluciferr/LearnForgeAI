@@ -109,3 +109,29 @@ describe("coming back to the library", () => {
     expect(await screen.findByText("Kubernetes Operators")).toBeInTheDocument();
   });
 });
+
+describe("while things are on their way", () => {
+  it("shows the shape of the library rather than a blank word", async () => {
+    // A course is a few hundred kilobytes read from another continent; this is on screen for
+    // seconds, not a flicker.
+    vi.spyOn(api, "jobs").mockResolvedValue([]);
+    vi.spyOn(api, "courses").mockReturnValue(new Promise(() => {}));
+
+    show();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/loading your courses/i)).toBeInTheDocument(),
+    );
+    expect(document.querySelectorAll(".book.skeleton").length).toBeGreaterThan(0);
+  });
+
+  it("stops showing it once the courses arrive", async () => {
+    vi.spyOn(api, "jobs").mockResolvedValue([]);
+    vi.spyOn(api, "courses").mockResolvedValue([course]);
+
+    show();
+
+    await screen.findByText("Kubernetes Operators");
+    expect(screen.queryByLabelText(/loading your courses/i)).toBeNull();
+  });
+});
