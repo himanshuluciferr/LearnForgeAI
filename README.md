@@ -37,7 +37,6 @@ executors connected by edges.
 | `backend/skills/` | Reusable capabilities exposed to agents as tools |
 | `backend/prompts/` | Centralized prompt templates |
 | `backend/services/` | Thin Azure wrappers — swappable and mockable |
-| `teams_bot/` | Parked. Predates authentication and does not currently work. |
 
 ## Workflow
 

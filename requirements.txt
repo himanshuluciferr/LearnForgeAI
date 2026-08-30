@@ -25,10 +25,7 @@ azure-search-documents
 azure-cosmos
 azure-storage-blob
 azure-ai-projects
-
-# --- Teams / M365 Agent ---
-botbuilder-core
-botbuilder-integration-aiohttp
+# Not imported directly: the async Cosmos and Blob clients are built on it.
 aiohttp
 
 # --- Export ---
