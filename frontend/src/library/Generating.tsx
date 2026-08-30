@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { api } from "../api/client";
 import { useJobProgress } from "../api/useJobProgress";
 import type { JobProgress } from "../api/types";
@@ -22,7 +23,7 @@ interface Props {
 }
 
 export function Generating({ jobId, onFinished, onCancel }: Props) {
-  const { progress, error } = useJobProgress(jobId);
+  const { progress, error, resume } = useJobProgress(jobId);
 
   if (error) return <p className="error">{error}</p>;
   if (!progress) return <p className="muted">Starting…</p>;
@@ -47,9 +48,10 @@ export function Generating({ jobId, onFinished, onCancel }: Props) {
     );
   }
 
-  if (progress.status === "needs-choice") return <Choice progress={progress} jobId={jobId} />;
+  if (progress.status === "needs-choice")
+    return <Choice progress={progress} jobId={jobId} onAnswered={resume} />;
   if (progress.status === "needs-confirmation")
-    return <Confirm progress={progress} jobId={jobId} />;
+    return <Confirm progress={progress} jobId={jobId} onAnswered={resume} />;
 
   return (
     <section className="card">
@@ -65,22 +67,55 @@ export function Generating({ jobId, onFinished, onCancel }: Props) {
   );
 }
 
-function Choice({ progress, jobId }: { progress: JobProgress; jobId: string }) {
+interface GateProps {
+  progress: JobProgress;
+  jobId: string;
+  onAnswered: () => void;
+}
+
+/** One press, one answer, and a visible failure. `void api.confirm(...)` threw an unhandled
+ *  409 the moment a second press landed on a job that had already resumed. */
+function useAnswer(jobId: string, onAnswered: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const answer = async (choice?: string) => {
+    if (busy) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.confirm(jobId, choice);
+      onAnswered();
+    } catch (caught) {
+      setFailed(caught instanceof Error ? caught.message : "That did not go through");
+      setBusy(false);
+    }
+  };
+
+  return { answer, busy, failed };
+}
+
+function Choice({ progress, jobId, onAnswered }: GateProps) {
+  const { answer, busy, failed } = useAnswer(jobId, onAnswered);
+
   return (
     <section className="card">
       <p>{progress.detail ?? "Which one did you mean?"}</p>
       <div className="row wrap">
         {progress.options.map((option) => (
-          <button key={option} onClick={() => void api.confirm(jobId, option)}>
+          <button key={option} disabled={busy} onClick={() => answer(option)}>
             {option}
           </button>
         ))}
       </div>
+      {failed && <p className="error">{failed}</p>}
     </section>
   );
 }
 
-function Confirm({ progress, jobId }: { progress: JobProgress; jobId: string }) {
+function Confirm({ progress, jobId, onAnswered }: GateProps) {
+  const { answer, busy, failed } = useAnswer(jobId, onAnswered);
+
   return (
     <section className="card">
       <h3>{progress.subject_name}</h3>
@@ -92,7 +127,10 @@ function Confirm({ progress, jobId }: { progress: JobProgress; jobId: string }) 
           ))}
         </ul>
       )}
-      <button onClick={() => void api.confirm(jobId)}>Yes, that is it</button>
+      <button disabled={busy} onClick={() => answer()}>
+        {busy ? "Starting…" : "Yes, that is it"}
+      </button>
+      {failed && <p className="error">{failed}</p>}
     </section>
   );
 }

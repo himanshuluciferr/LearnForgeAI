@@ -21,13 +21,23 @@ export const SETTLED = new Set([
 export function useJobProgress(jobId: string | null) {
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped to watch again after the learner answers a gate. Without it the page freezes on
+  // the question it just asked: needs-confirmation is a settled status, so the stream closes,
+  // and nothing reopened it when the job started running again.
+  const [watch, setWatch] = useState(0);
   // Read inside the poll loop, which would otherwise close over the first value forever.
   const settled = useRef(false);
+  const lastJob = useRef<string | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
+    if (lastJob.current !== jobId) {
+      // Only for a different job: clearing it on every resume flashes "Starting…" at someone
+      // who is already several steps in.
+      setProgress(null);
+      lastJob.current = jobId;
+    }
     settled.current = false;
-    setProgress(null);
     setError(null);
 
     let source: EventSource | null = null;
@@ -83,7 +93,7 @@ export function useJobProgress(jobId: string | null) {
       source?.close();
       window.clearTimeout(timer);
     };
-  }, [jobId]);
+  }, [jobId, watch]);
 
-  return { progress, error };
+  return { progress, error, resume: () => setWatch((count) => count + 1) };
 }

@@ -76,7 +76,9 @@ async def run_generation(
         # Every write carries the partition key, so no job update is a cross-partition query.
         await job_store.update(job_id, user_id=request.user_id, **fields)
 
-    await update(status=JobStatus.RUNNING)
+    # Empty rather than None: an update skips None, so the question the learner has just
+    # answered would otherwise sit under the progress bar for the rest of the run.
+    await update(status=JobStatus.RUNNING, detail="")
 
     resuming = state is not None
     # Executors mutate this object in place, so it stays the source of truth for progress.

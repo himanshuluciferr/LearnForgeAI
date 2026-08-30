@@ -214,3 +214,25 @@ async def test_the_file_store_summarises_the_same_way_the_query_does(tmp_path):
     rows = await store.summaries("u1")
 
     assert rows[0]["title"] == "A Course" and rows[0]["chapters"] == 1
+
+def test_a_draft_with_no_chapters_is_not_offered_as_a_course():
+    """One appeared in a learner's library as "Untitled course, 0 chapters" while the run was
+    still going, and opening it showed an empty page."""
+    from backend.services.course_store import READABLE, SUMMARY_FIELDS  # noqa: PLC0415
+
+    assert "ARRAY_LENGTH(c.state.chapters) > 0" == READABLE
+    assert "chapters" in SUMMARY_FIELDS
+
+
+@pytest.mark.asyncio
+async def test_the_file_store_hides_the_same_drafts(tmp_path):
+    store = FileCourseStore(tmp_path)
+    finished = course_with_quizzes()
+    draft = make_course()
+    draft.state.chapters = []
+    await store.save(finished)
+    await store.save(draft)
+
+    rows = await store.summaries("u1")
+
+    assert [row["id"] for row in rows] == [finished.id]

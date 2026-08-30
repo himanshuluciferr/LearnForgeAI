@@ -43,11 +43,13 @@ DISPLAY_FIELDS = """
 """
 
 # The library shows a title and a chapter count. Reading whole courses to render that was
-# hundreds of kilobytes per row.
+# hundreds of kilobytes per row. Drafts saved mid-generation are left out: a course with no
+# chapters opens on an empty page, and one appeared in the library as "Untitled course".
 SUMMARY_FIELDS = """
     c.id, c.created_at, c.state.curriculum.title,
     ARRAY_LENGTH(c.state.chapters) AS chapters
 """
+READABLE = "ARRAY_LENGTH(c.state.chapters) > 0"
 
 
 def as_stored(row: dict[str, Any]) -> dict[str, Any]:
@@ -199,6 +201,7 @@ class FileCourseStore:
                 "chapters": len(course.state.chapters),
             }
             for course in await self.for_user(user_id, limit)
+            if course.state.chapters
         ]
 
 
@@ -260,8 +263,8 @@ class CosmosCourseStore:
         return [
             item
             async for item in get_container(COURSES).query_items(
-                f"SELECT {SUMMARY_FIELDS} FROM c ORDER BY c.{ORDER_FIELD} DESC "  # noqa: S608
-                "OFFSET 0 LIMIT @limit",
+                f"SELECT {SUMMARY_FIELDS} FROM c WHERE {READABLE} "  # noqa: S608
+                f"ORDER BY c.{ORDER_FIELD} DESC OFFSET 0 LIMIT @limit",
                 parameters=[{"name": "@limit", "value": limit}],
                 partition_key=user_id,
             )
