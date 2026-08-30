@@ -20,6 +20,9 @@ from backend.workflow.state import WorkflowStep
 # only user_id, status and created_at. Named so a test can check the policy still covers it.
 ORDER_FIELD = "created_at"
 
+# What the learner is told about a run the server did not survive.
+ABANDONED = "The server restarted before this course was finished. Please ask again."
+
 
 def _apply(job: GenerationJob, updates: dict[str, Any]) -> GenerationJob:
     for field, value in updates.items():
@@ -35,6 +38,8 @@ class JobStore(Protocol):
     async def get(self, job_id: str, user_id: str | None = None) -> GenerationJob | None: ...
 
     async def for_user(self, user_id: str, limit: int = 5) -> list[GenerationJob]: ...
+
+    async def abandon_unfinished(self) -> int: ...
 
     async def update(
         self,
@@ -58,6 +63,19 @@ class InMemoryJobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, GenerationJob] = {}
         self._lock = asyncio.Lock()
+
+    async def abandon_unfinished(self) -> int:
+        async with self._lock:
+            stale = [
+                job
+                for job in self._jobs.values()
+                if job.status in (JobStatus.QUEUED, JobStatus.RUNNING)
+            ]
+            for job in stale:
+                job.status = JobStatus.FAILED
+                job.error = ABANDONED
+                job.updated_at = datetime.now(timezone.utc)
+            return len(stale)
 
     async def create(self, job: GenerationJob) -> GenerationJob:
         async with self._lock:
@@ -120,6 +138,32 @@ class InMemoryJobStore:
 
 class CosmosJobStore:
     """Partitioned by user_id, so a read that knows the user costs one point read."""
+
+    async def abandon_unfinished(self) -> int:
+        """Closes out runs whose worker no longer exists.
+
+        Generation runs in a BackgroundTask, which dies with the process. The job row does not:
+        it keeps saying `running` for ever, and the learner is left watching a bar that will
+        never move. Two were found sitting at 30% and 60% after a restart.
+
+        Cross-partition, and correct only where one process owns every run. A second instance
+        would abandon the first's live jobs, so this needs replacing with a lease before this
+        ever scales out.
+        """
+        container = get_container(JOBS)
+        stale = [
+            item
+            async for item in container.query_items(
+                "SELECT * FROM c WHERE c.status IN ('queued', 'running')"
+            )
+        ]
+        for document in stale:
+            job = GenerationJob.model_validate(document)
+            job.status = JobStatus.FAILED
+            job.error = ABANDONED
+            job.updated_at = datetime.now(timezone.utc)
+            await container.replace_item(job.id, to_document(job))
+        return len(stale)
 
     async def create(self, job: GenerationJob) -> GenerationJob:
         await get_container(JOBS).create_item(to_document(job))

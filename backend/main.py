@@ -14,6 +14,7 @@ from backend.config.settings import get_settings
 from backend.services.blob_storage import close_blob_storage
 from backend.services.ai_search import close_search
 from backend.services.cosmos import close_cosmos
+from backend.services.job_store import job_store
 
 # Anything the API owns. The app's own routes are namespaced under /read so they cannot
 # collide: one url cannot mean both a JSON document and a page.
@@ -28,6 +29,14 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # A run lives in a BackgroundTask, which dies with the process while its job row goes on
+    # saying `running`. Nothing else will ever close those out.
+    abandoned = await job_store.abandon_unfinished()
+    if abandoned:
+        logging.getLogger(__name__).warning(
+            "marked %d unfinished run(s) as failed: their worker did not survive the restart",
+            abandoned,
+        )
     yield
     # Both clients hold sockets and a credential that must not leak on reload. Every
     # service with a cached connection belongs here the day it is written.
