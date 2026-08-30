@@ -18,6 +18,8 @@ os.environ["JWT_SECRET"] = "test-signing-key-not-used-anywhere-real"
 import pytest  # noqa: E402
 
 from backend.agents import fanout  # noqa: E402
+from backend.models.user import User  # noqa: E402
+from backend.services import user_store as users  # noqa: E402
 from backend.services.security import create_token  # noqa: E402
 
 
@@ -26,7 +28,13 @@ def as_user(user_id: str) -> dict[str, str]:
 
     Tests call the API the way the app does, through a real signed token, rather than by
     overriding the dependency: the token path is the thing that has to work.
+
+    The account is registered too, because the dependency now checks that it still exists and
+    a token has never been obtainable without one.
     """
+    users.user_store.remember(
+        User(id=user_id, user_id=user_id, email=user_id, password_hash="not a real hash")
+    )
     return {"Authorization": f"Bearer {create_token(user_id, user_id)}"}
 
 

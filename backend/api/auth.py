@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from backend.api.deps import CurrentLearner
 from backend.models.user import User
 from backend.schemas.auth import Credentials, Learner, Session, SignUp, StreamTicket
+from backend.services import user_store as users
 from backend.services.security import (
     TICKET_SECONDS,
     create_stream_ticket,
@@ -21,7 +22,6 @@ from backend.services.security import (
     user_id_for,
     verify_password,
 )
-from backend.services.user_store import user_store
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -34,7 +34,7 @@ WRONG = HTTPException(
 async def signup(request: SignUp) -> Session:
     email = request.email.strip().lower()
     user_id = user_id_for(email)
-    created = await user_store.create(
+    created = await users.user_store.create(
         User(
             id=user_id,
             user_id=user_id,
@@ -58,7 +58,7 @@ async def signup(request: SignUp) -> Session:
 @router.post("/login")
 async def login(request: Credentials) -> Session:
     email = request.email.strip().lower()
-    user = await user_store.get(user_id_for(email))
+    user = await users.user_store.get(user_id_for(email))
     # Hashed even when no such user exists, so the reply time does not say which emails are
     # registered, and both failures give the same message for the same reason.
     stored = user.password_hash if user else hash_password("no such user")

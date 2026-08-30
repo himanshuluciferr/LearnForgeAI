@@ -22,6 +22,11 @@ class InMemoryUserStore:
         self._users: dict[str, User] = {}
         self._lock = asyncio.Lock()
 
+    def remember(self, user: User) -> None:
+        """Synchronous, for tests that mint a token before any request is made. A token cannot
+        exist without an account, and the dependency now checks that."""
+        self._users[user.user_id] = user
+
     async def get(self, user_id: str) -> User | None:
         async with self._lock:
             return self._users.get(user_id)

@@ -13,10 +13,18 @@ from fastapi.routing import APIRoute
 from fastapi.security.base import SecurityBase
 from fastapi.testclient import TestClient
 
-from backend.api import auth as auth_api
+from backend.api import auth as auth_api  # noqa: F401
+from backend.api import deps
 from backend.api.deps import CurrentLearner, ticket_holder
 from backend.main import app
-from backend.services.security import create_stream_ticket, create_token, read_token
+from backend.models.user import User
+from backend.services.security import (
+    create_stream_ticket,
+    create_token,
+    read_token,
+    user_id_for,
+)
+from backend.services import user_store as user_store_module
 from backend.services.user_store import InMemoryUserStore
 
 client = TestClient(app)
@@ -26,9 +34,13 @@ SIGNUP = {"email": "ada@example.com", "password": "correct horse battery", "name
 
 @pytest.fixture(autouse=True)
 def store(monkeypatch):
+    # Patched on the module, not on a name auth.py bound at import: the dependency reads the
+    # same attribute, and the two must not end up looking at different stores.
     users = InMemoryUserStore()
-    monkeypatch.setattr(auth_api, "user_store", users)
-    return users
+    monkeypatch.setattr(user_store_module, "user_store", users)
+    deps.forget()
+    yield users
+    deps.forget()
 
 
 def signup(**changes) -> dict:
@@ -265,3 +277,69 @@ def test_the_guards_above_can_actually_fail():
     assert not is_secured(routes["/leaky"].dependant)
     assert is_secured(routes["/guarded"].dependant)
 
+
+
+# --- an account that is no longer there ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_token_stops_working_once_the_account_is_gone(store):
+    """A signature says the token was ours, not that the account still exists. Signing in as
+    a deleted learner worked for the whole seven days the token was good for."""
+    token = signup()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.get("/auth/me", headers=headers).status_code == 200
+
+    store._users.clear()
+    deps.forget()
+
+    assert client.get("/auth/me", headers=headers).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_token_for_an_account_that_never_existed_is_refused():
+    """The signing key is the same, so nothing about the token itself gives it away."""
+    minted = create_token("nobody-ever-registered", "ghost@example.com")
+
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {minted}"})
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_the_account_is_not_looked_up_on_every_single_request(store):
+    """Checking the store each time would put a point read in front of every call. A
+    confirmed account is trusted briefly instead."""
+    signup()
+    reads = 0
+    original = store.get
+
+    async def counted(user_id):
+        nonlocal reads
+        reads += 1
+        return await original(user_id)
+
+    store.get = counted
+    token = client.post(
+        "/auth/login", json={"email": SIGNUP["email"], "password": SIGNUP["password"]}
+    ).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    for _ in range(5):
+        assert client.get("/auth/me", headers=headers).status_code == 200
+
+    # One for the login itself, one for the first request; the rest ride on the confirmation.
+    assert reads <= 2
+
+
+@pytest.mark.asyncio
+async def test_a_new_account_is_not_locked_out_by_a_remembered_miss(store):
+    """Only a positive is cached. Remembering a miss would keep a learner out for a minute
+    after signing up."""
+    ghost = user_id_for("later@example.com")
+    assert await deps.still_registered(ghost) is False
+
+    store.remember(
+        User(id=ghost, user_id=ghost, email="later@example.com", password_hash="x")
+    )
+
+    assert await deps.still_registered(ghost) is True
