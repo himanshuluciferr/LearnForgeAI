@@ -713,20 +713,17 @@ The rule: **if it can be done without a model, or is needed by more than one age
 skill.** Skills keep agents thin and make the deterministic parts unit-testable without
 spending tokens.
 
-| Skill | Used by | What it does | Status |
-|---|---|---|---|
-| `research` | research-agent | Fetches candidate sources | 🚧 |
-| `ranking` | research-agent | Scores/orders sources by trust and relevance | 🚧 |
-| `chapter_writer` | chapter-agent | Long-form chapter prose | 🚧 |
-| `code_generator` | chapter, practice, project | Runnable, idiomatic code samples | 🚧 |
-| `diagrams` | chapter-agent | Mermaid diagrams for concepts | 🚧 |
-| `quiz_generator` | quiz, practice | Question sets with correct answers | 🚧 |
-| `project_generator` | project-agent | Project scaffolds and milestones | ✅ |
-| `reviewer` | review-agent | Returns a quality score | ✅ |
-| `exporter` | publisher | Course → one Markdown document | ✅ |
+| Skill | Used by | What it does |
+|---|---|---|
+| `passages` | chapter, mentor, review, retrieval, course-index | Selects the passages a prompt is given |
+| `ranking` | research-agent | Scores and orders sources by trust and relevance |
+| `diagrams` | chapter-agent | Turns a diagram's parts into Mermaid |
+| `grounding` | review-agent | Checks claims against the retrieved text |
+| `exporter` | publisher | Course → one Markdown document |
 
-`code_generator` is the clearest case for the split: chapters need examples, practice needs
-starter code, projects need scaffolds. One skill, three callers.
+Everything else an agent does is a model call, and lives in `backend/agents/`. A skill earns
+its place by being called; an empty package named after an intention reads like work that
+has been done.
 
 ---
 
