@@ -115,5 +115,9 @@ def stream_response(request: Request, job_id: str, user_id: str) -> StreamingRes
             "Connection": "keep-alive",
             # nginx buffers a response body by default, which would hold every event back.
             "X-Accel-Buffering": "no",
+            # Declaring one keeps the gzip middleware off this response. A compressor waits
+            # for enough bytes to be worth emitting, which is exactly the delay a stream
+            # exists to avoid.
+            "Content-Encoding": "identity",
         },
     )

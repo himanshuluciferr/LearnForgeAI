@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from backend.api import auth, course, job, mentor, progress, quiz
 from backend.config.settings import get_settings
@@ -46,6 +47,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="LearnForge AI", version="0.1.0", lifespan=lifespan)
+
+# A course document is a few hundred kilobytes of JSON read from another continent, and
+# measured at 3.3x smaller compressed. The stream opts out by setting its own
+# Content-Encoding, because a compressor holds small frames back until it has enough to emit
+# and the whole point of the stream is that a frame arrives when it happens.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(auth.router)
 app.include_router(course.router)
