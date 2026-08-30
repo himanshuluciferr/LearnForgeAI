@@ -21,6 +21,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 from backend.services.ai_search import search_enabled, vectors_enabled  # noqa: E402
 from backend.services.cosmos import COURSES, close_cosmos, get_container  # noqa: E402
 from backend.services.course_index import documents, index_course  # noqa: E402
+from backend.services.course_store import load  # noqa: E402
 from backend.workflow.state import CourseState  # noqa: E402
 
 
@@ -31,14 +32,13 @@ async def stored(user: str | None) -> list[tuple[str, str, CourseState]]:
     async for doc in container.query_items(
         query=query, **({"partition_key": user} if user else {})
     ):
-        try:
-            state = CourseState.model_validate(doc["state"])
-        except Exception:
-            # Courses from before the retrieval rebuild no longer validate; skipping them is
-            # right, and assuming the query broke would not be.
+        # Through the store's loader, which repairs courses written by earlier versions.
+        # Validating the state here instead skipped four courses the app itself can read.
+        course = load(dict(doc))
+        if course is None:
             print(f"  skipped {doc.get('id', '?')[:8]}: does not load", flush=True)
             continue
-        found.append((doc["id"], doc["user_id"], state))
+        found.append((course.id, course.user_id, course.state))
     return found
 
 

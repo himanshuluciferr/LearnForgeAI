@@ -43,11 +43,17 @@ async def embed(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
     client = get_embedding_client()
-    deployment = get_settings().embedding_deployment
+    settings = get_settings()
     vectors: list[list[float]] = []
     for start in range(0, len(texts), BATCH):
         chunk = texts[start : start + BATCH]
-        response = await client.embeddings.create(model=deployment, input=chunk)
+        # Asked for explicitly: the index field is built to this width, and a vector of any
+        # other length is rejected on upload. Without it the setting was decoration.
+        response = await client.embeddings.create(
+            model=settings.embedding_deployment,
+            input=chunk,
+            dimensions=settings.embedding_dimensions,
+        )
         ordered = sorted(response.data, key=lambda item: item.index)
         vectors.extend(item.embedding for item in ordered)
     if len(vectors) != len(texts):

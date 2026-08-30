@@ -36,7 +36,10 @@ class Settings(BaseSettings):
     # Vector search needs an embedding deployment, which is a second model on the Foundry
     # account. Empty means the index is keyword-only and never asks for a vector.
     embedding_deployment: str = ""
-    embedding_dimensions: int = 1536
+    # Vectors are 90% of the index: one course of 200 passages measured 3.92 MB at 1536
+    # dimensions, and only twelve of those fit the search tier's 50 MB. text-embedding-3-small
+    # is trained so a shortened vector still works, and 512 leaves room for thirty-two.
+    embedding_dimensions: int = 512
 
     # Empty generates one per process, so sessions do not survive a restart. Deliberate: a
     # default in source would be the same signing key on every deployment.
