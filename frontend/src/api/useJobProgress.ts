@@ -18,6 +18,10 @@ export const SETTLED = new Set([
   "needs-confirmation",
 ]);
 
+// Not the same set: a job waiting on the learner has settled as far as the stream is
+// concerned, but the run is still very much alive and worth returning to.
+export const FINISHED = new Set(["completed", "failed", "rejected"]);
+
 export function useJobProgress(jobId: string | null) {
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [error, setError] = useState<string | null>(null);

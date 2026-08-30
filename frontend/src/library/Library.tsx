@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { FINISHED } from "../api/useJobProgress";
 import type { CourseSummary } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Generating } from "./Generating";
@@ -21,6 +22,15 @@ export function Library() {
 
   useEffect(() => {
     void load();
+    // The job id lived only in this component, so a reload left a run going with nothing on
+    // screen and no way back to it. The server knows; ask.
+    api
+      .jobs()
+      .then((jobs) => {
+        const live = jobs.find((job) => !FINISHED.has(job.status));
+        if (live) setJobId(live.job_id);
+      })
+      .catch(() => undefined);
   }, []);
 
   const start = async () => {

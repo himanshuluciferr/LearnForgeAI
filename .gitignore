@@ -21,3 +21,6 @@ run*.txt
 node_modules/
 # Build output: `npm run build` in frontend/ writes the app here for FastAPI to serve.
 backend/static/
+
+# TypeScript incremental build state.
+*.tsbuildinfo
