@@ -104,3 +104,26 @@ def as_passages(rows: list[dict], budget: int):
 
 def get_retriever() -> Retriever:
     return SearchRetriever() if ai_search.search_enabled() else LexicalRetriever()
+
+
+async def warm() -> None:
+    """Opens what a mentor question needs, before a learner asks one.
+
+    Measured cold on a real service: 5.1s for the search token, 4.9s for the first query and
+    7.8s for the first embedding. All of it landed on whoever asked first.
+
+    Best effort by design. A warm-up that failed the app would trade a slow first answer for
+    no app at all.
+    """
+    if not ai_search.search_enabled():
+        return
+    try:
+        # An empty owner matches nothing, which is all this needs: the connection is the point.
+        await ai_search.search_passages("warm", "", "", None, top=1)
+        if ai_search.vectors_enabled():
+            from backend.services.embeddings import embed_one
+
+            await embed_one("warm")
+    except Exception:
+        logger.warning("retrieval warm-up failed; the first question will pay for it")
+        logger.debug("warm-up detail", exc_info=True)

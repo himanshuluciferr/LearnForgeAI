@@ -61,7 +61,14 @@ def _credential() -> DefaultAzureCredential:
     return DefaultAzureCredential()
 
 
+@lru_cache
 def get_search_client() -> SearchClient:
+    """One per process, like the Cosmos client. A fresh one per query spends a TLS handshake
+    before it can ask anything: measured at 4.4s a question against 286ms on a warm client,
+    which is most of what a mentor answer was waiting for.
+
+    Callers must not close it. `close_search` does that once, at shutdown.
+    """
     settings = get_settings()
     return SearchClient(settings.search_endpoint, settings.search_index, _credential())
 
@@ -132,9 +139,8 @@ async def upload(documents: Iterable[dict[str, Any]], batch: int = 500) -> int:
     if not rows:
         return 0
     client = get_search_client()
-    async with client:
-        for start in range(0, len(rows), batch):
-            await client.merge_or_upload_documents(rows[start : start + batch])
+    for start in range(0, len(rows), batch):
+        await client.merge_or_upload_documents(rows[start : start + batch])
     return len(rows)
 
 
@@ -142,13 +148,12 @@ async def drop_course(course_id: str, user_id: str) -> int:
     """A regenerated course keeps its id, so its old passages would otherwise stay searchable
     alongside the new ones."""
     client = get_search_client()
-    async with client:
-        results = await client.search(
-            search_text="*", filter=owned_by(course_id, user_id), select=["id"], top=1000
-        )
-        found = [{"id": row["id"]} async for row in results]
-        if found:
-            await client.delete_documents(found)
+    results = await client.search(
+        search_text="*", filter=owned_by(course_id, user_id), select=["id"], top=1000
+    )
+    found = [{"id": row["id"]} async for row in results]
+    if found:
+        await client.delete_documents(found)
     return len(found)
 
 
@@ -161,22 +166,24 @@ async def search_passages(
 ) -> list[dict[str, Any]]:
     """Hybrid when a vector is supplied, keyword when it is not."""
     client = get_search_client()
-    async with client:
-        results = await client.search(
-            search_text=question,
-            filter=owned_by(course_id, user_id),
-            vector_queries=(
-                [VectorizedQuery(vector=vector, k_nearest_neighbors=top, fields="vector")]
-                if vector
-                else None
-            ),
-            select=["id", "title", "url", "text", "chapter_number"],
-            top=top,
-        )
-        return [dict(row) async for row in results]
+    results = await client.search(
+        search_text=question,
+        filter=owned_by(course_id, user_id),
+        vector_queries=(
+            [VectorizedQuery(vector=vector, k_nearest_neighbors=top, fields="vector")]
+            if vector
+            else None
+        ),
+        select=["id", "title", "url", "text", "chapter_number"],
+        top=top,
+    )
+    return [dict(row) async for row in results]
 
 
 async def close_search() -> None:
+    if get_search_client.cache_info().currsize:
+        await get_search_client().close()
+        get_search_client.cache_clear()
     if _credential.cache_info().currsize:
         await _credential().close()
         _credential.cache_clear()

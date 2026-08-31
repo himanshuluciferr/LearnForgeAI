@@ -345,3 +345,62 @@ async def test_lookup_can_be_turned_off_for_a_caller_that_cannot_wait(agent, ret
     reply = await answer_question("q?", make_state([chapter(1)]), allow_lookup=False)
 
     assert calls == [] and reply.grounded is False
+
+
+# --- what retrieval costs a question --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_passages_are_fetched_once_not_twice(monkeypatch):
+    """The index is searched by course, not by corpus, so asking again with the research
+    sources returned the same passages: two embeddings, two queries, and half the prompt
+    spent repeating itself under a different heading."""
+    calls: list[int] = []
+
+    class Counting:
+        async def passages(self, question, sources, budget, **where):
+            calls.append(budget)
+            return "some passages"
+
+    monkeypatch.setattr(mentor_module, "get_retriever", Counting)
+
+    await mentor_module.build_prompt("why?", make_state([chapter(1)]))
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_one_call_gets_the_budget_the_two_used_to_share(monkeypatch):
+    """Halving the budget while merging the calls would quietly shrink the prompt."""
+    budgets: list[int] = []
+
+    class Counting:
+        async def passages(self, question, sources, budget, **where):
+            budgets.append(budget)
+            return "some passages"
+
+    monkeypatch.setattr(mentor_module, "get_retriever", Counting)
+
+    await mentor_module.build_prompt("why?", make_state([chapter(1)]))
+
+    assert budgets == [mentor_module.CHARS_PER_ANSWER * 2]
+
+
+@pytest.mark.asyncio
+async def test_both_the_chapters_and_the_sources_are_offered(monkeypatch):
+    """Lexical selects across everything we hold; dropping the research would lose the pages
+    the course was written from."""
+    seen: list[str] = []
+
+    class Capturing:
+        async def passages(self, question, sources, budget, **where):
+            seen.extend(source.url for source in sources)
+            return "some passages"
+
+    monkeypatch.setattr(mentor_module, "get_retriever", Capturing)
+    state = make_state([chapter(1)], [source("written from", "https://example.com")])
+
+    await mentor_module.build_prompt("why?", state)
+
+    assert "https://example.com" in seen
+    assert any(url.startswith("chapter-") for url in seen)

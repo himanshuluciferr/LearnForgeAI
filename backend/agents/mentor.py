@@ -85,24 +85,25 @@ def as_sources(chapters: list[Chapter]) -> list[ResearchSource]:
 async def build_prompt(
     question: str, state: CourseState, extra: str = "", where: dict[str, str] | None = None
 ) -> str:
-    """The course first, then what it was written from, then anything freshly read, then the
-    question — last, so a long corpus cannot push it out of sight.
+    """What the course holds, then anything freshly read, then the question — last, so a long
+    corpus cannot push it out of sight.
 
     Retrieval goes through the retriever rather than the selector directly, so an indexed
     course is searched and any other falls back to scanning what we hold.
     """
     retriever = get_retriever()
     keys = where or {}
-    course = await retriever.passages(
-        question, as_sources(state.chapters), CHARS_PER_ANSWER, **keys
-    )
-    sources = await retriever.passages(question, state.research, CHARS_PER_ANSWER, **keys)
+    # One retrieval over everything, at the budget the two calls used to share. The index is
+    # searched by course rather than by corpus, so asking it a second time with the research
+    # sources returned the same passages again: two embeddings, two queries, and half the
+    # prompt spent repeating itself under a different heading.
+    corpus = [*as_sources(state.chapters), *state.research]
+    passages = await retriever.passages(question, corpus, CHARS_PER_ANSWER * 2, **keys)
     title = state.curriculum.title if state.curriculum else "this course"
     looked_up = f"\n\nRead just now, because the course did not cover it:\n{extra}" if extra else ""
     return (
         f"Course: {title}\n\n"
-        f"From the course itself:\n{course}\n\n"
-        f"From the pages the course was written from:\n{sources}"
+        f"From the course and the pages it was written from:\n{passages}"
         f"{looked_up}\n\n"
         f'The learner asks:\n"""\n{question}\n"""'
     )

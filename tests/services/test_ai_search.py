@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from backend.services import ai_search
+from backend.services import retrieval
 from backend.services.course_index import documents, index_course, passage_id
 from backend.services.retrieval import (
     LexicalRetriever,
@@ -202,3 +203,104 @@ def test_a_quote_in_an_id_cannot_rewrite_the_filter():
     """OData escapes a quote by doubling it; unescaped, an id could change the filter rather
     than be matched by it."""
     assert "''" in ai_search.owned_by("c'1", "u1")
+
+
+# --- one client, not one per question -------------------------------------------------
+
+
+def test_the_search_client_is_shared():
+    """A fresh client per query spends a TLS handshake before it can ask anything: measured
+    at 4.4s a question against 286ms warm."""
+    ai_search.get_search_client.cache_clear()
+
+    first = ai_search.get_search_client()
+    second = ai_search.get_search_client()
+
+    assert first is second
+    ai_search.get_search_client.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_a_query_leaves_the_client_open_for_the_next_one(monkeypatch):
+    """Closing it after each query is what made every question pay for a new connection."""
+    closed: list[bool] = []
+
+    class Client:
+        async def search(self, **kwargs):
+            async def rows():
+                return
+                yield
+
+            return rows()
+
+        async def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(ai_search, "get_search_client", Client)
+
+    await ai_search.search_passages("q", "c1", "u1")
+
+    assert closed == []
+
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_the_shared_client(monkeypatch):
+    """Nothing else closes it now, so a reload would leak the socket."""
+    closed: list[str] = []
+
+    class Client:
+        async def close(self):
+            closed.append("client")
+
+    ai_search.get_search_client.cache_clear()
+    monkeypatch.setattr(ai_search, "SearchClient", lambda *args, **kwargs: Client())
+
+    ai_search.get_search_client()
+    await ai_search.close_search()
+
+    assert closed == ["client"]
+    assert ai_search.get_search_client.cache_info().currsize == 0
+
+
+# --- warming up -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_warming_up_does_nothing_without_a_search_service(monkeypatch):
+    asked: list[str] = []
+    monkeypatch.setattr(ai_search, "search_enabled", lambda: False)
+    monkeypatch.setattr(ai_search, "search_passages", lambda *a, **k: asked.append("no"))
+
+    await retrieval.warm()
+
+    assert asked == []
+
+
+@pytest.mark.asyncio
+async def test_warming_up_opens_the_connection(monkeypatch):
+    asked: list[tuple] = []
+
+    async def note(*args, **kwargs):
+        asked.append(args)
+        return []
+
+    monkeypatch.setattr(ai_search, "search_enabled", lambda: True)
+    monkeypatch.setattr(ai_search, "vectors_enabled", lambda: False)
+    monkeypatch.setattr(ai_search, "search_passages", note)
+
+    await retrieval.warm()
+
+    assert len(asked) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_warm_up_that_fails_does_not_take_the_app_with_it(monkeypatch):
+    """Trading a slow first answer for no app at all would be a poor bargain."""
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("the search service is not answering")
+
+    monkeypatch.setattr(ai_search, "search_enabled", lambda: True)
+    monkeypatch.setattr(ai_search, "search_passages", broken)
+
+    await retrieval.warm()

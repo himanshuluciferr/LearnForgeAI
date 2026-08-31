@@ -1,5 +1,6 @@
 """FastAPI application entrypoint."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from backend.services.blob_storage import close_blob_storage
 from backend.services.ai_search import close_search
 from backend.services.cosmos import close_cosmos
 from backend.services.job_store import job_store
+from backend.services.retrieval import warm
 
 # Anything the API owns. The app's own routes are namespaced under /read so they cannot
 # collide: one url cannot mean both a JSON document and a page.
@@ -38,7 +40,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "marked %d unfinished run(s) as failed: their worker did not survive the restart",
             abandoned,
         )
+    # In the background, so a slow handshake delays nobody's first page rather than the
+    # server coming up at all.
+    warming = asyncio.create_task(warm())
     yield
+    warming.cancel()
     # Both clients hold sockets and a credential that must not leak on reload. Every
     # service with a cached connection belongs here the day it is written.
     await close_cosmos()
