@@ -3,22 +3,25 @@
 Source of truth for the design: what we are building, how the pieces fit, what every
 agent and skill does, and why the folders are laid out this way.
 
-> **Status legend used throughout:** ✅ built and verified live · 🚧 stub exists, not implemented · 📋 planned, no file yet
+> Status marks are used only for work that is **not** built. Anything described in the
+> present tense exists and is tested; §11 lists what does not. Ticks on individual rows
+> rot faster than the prose around them, and a skill once sat here marked done while being
+> an empty file.
 
 ---
 
 ## 1. What we are building
 
-An employee types this in Microsoft Teams:
+A learner signs in and types this:
 
 ```
-@LearnForge Teach me Azure AI Search, 30 minutes a day
+Teach me Azure AI Search, 30 minutes a day
 ```
 
 A few minutes later they get back a complete, quality-reviewed course: an outline,
-written chapters, practice exercises, portfolio projects, and quizzes. From then on they
-can ask follow-up questions and an AI mentor answers them **grounded in that specific
-course**, not from generic knowledge.
+written chapters, practice exercises, portfolio projects, and quizzes. They read it a
+chapter at a time, take the quiz on each, and ask follow-up questions that an AI mentor
+answers **grounded in that specific course**, not from generic knowledge.
 
 ### Why this is not just "call an LLM in a loop"
 
@@ -32,10 +35,11 @@ rewritten. That is what the workflow graph in §4 is for.
 
 | Journey | Trigger | What happens |
 |---|---|---|
-| Generate a course | `@LearnForge teach me <skill>` | Full graph runs, progress card updates live |
-| Check progress | `@LearnForge progress` | Reads learner progress from Cosmos |
-| Take a quiz | Adaptive Card button | Quiz card → answer → scored and stored |
-| Ask the mentor | `@LearnForge ask <question>` | Mentor agent answers using that user's course |
+| Sign in | Email and password | scrypt-hashed, session is a signed token (§9) |
+| Generate a course | "teach me \<skill\>" in the library | Full graph runs, progress streams live |
+| Read a chapter | Click it in the contents | Opens over the page; the whole book arrived in one response |
+| Take a quiz | Button in the chapter | Marked on the server, so a score cannot be forged |
+| Ask the mentor | Question box in the course | Answers from that course, or says it does not cover it |
 
 ---
 
@@ -43,8 +47,8 @@ rewritten. That is what the workflow graph in §4 is for.
 
 ```mermaid
 flowchart LR
-    U[User in Teams] --> B[teams-bot<br/>Bot Framework]
-    B -->|HTTP| API[FastAPI backend]
+    U[Learner in a browser] --> APP[React app<br/>served by FastAPI]
+    APP -->|HTTP + bearer token| API[FastAPI backend]
 
     subgraph Backend
         API --> JOB[Job store]
@@ -64,6 +68,11 @@ flowchart LR
     style COSMOS fill:#0078d4,color:#fff
 ```
 
+The app and the API are **one deployable**. FastAPI serves the built React bundle from
+`backend/static`, so there is one origin, one url and no CORS. The app's own routes live
+under `/read` because `/courses/{id}` is already the API's, and one url cannot mean both a
+page and a JSON document.
+
 ### Hosting model — "Option A"
 
 There are two ways to run agents with Microsoft Foundry. We chose the first:
@@ -76,39 +85,46 @@ There are two ways to run agents with Microsoft Foundry. We chose the first:
 | Debugging | Local breakpoints work | Remote traces |
 | Cost | Only tokens | Tokens + hosting |
 
-**Why:** we own the orchestration logic and can debug it locally. Agent code stays
-portable — if the mentor agent later needs to be a hosted Foundry agent (so Teams can
-call it directly without waking our backend), moving just that one agent is a small change.
+**Why:** we own the orchestration logic and can debug it locally, and agent code stays
+portable if any one agent later needs to run somewhere else.
 
 ---
 
 ## 3. Request lifecycle
 
 Course generation takes minutes, and HTTP requests time out. So generation is
-**asynchronous**: the API accepts the job, returns immediately, and the client polls.
+**asynchronous**: the API accepts the job, returns immediately, and the client watches.
 
 ```mermaid
 sequenceDiagram
-    participant T as Teams
+    participant B as Browser
     participant A as FastAPI
     participant J as Job store
     participant W as Workflow
 
-    T->>A: POST /courses {user_id, prompt}
+    B->>A: POST /courses {prompt}
     A->>J: create job (queued)
-    A-->>T: 202 {job_id, status_url}
+    A-->>B: 202 {job_id, status_url}
     A->>W: run in background
 
+    B->>A: GET /courses/{job_id}/stream?ticket=…
     loop each executor
         W->>W: agent fills its slice of CourseState
         W->>J: update step + percent
+        A-->>B: event: progress {step, percent}
     end
-
-    loop until terminal
-        T->>A: GET /courses/{job_id}/progress
-        A-->>T: {status, step, percent}
-    end
+    A-->>B: event: done
 ```
+
+The learner never sends their own id. It comes from the token (§9), and no route accepts
+it from the caller.
+
+Progress is **streamed**, not polled: ten steps over several minutes meant a client asking
+every two seconds spent nearly all of it being told nothing had changed. `EventSource`
+cannot send an `Authorization` header, so the stream is opened with a sixty-second ticket
+that works on nothing else. The client falls back to polling if the stream cannot be
+opened, because a proxy that strips `text/event-stream` would otherwise leave the page
+silent.
 
 ### Job states
 
@@ -122,13 +138,18 @@ sequenceDiagram
 | `needs-choice` | The learner named several skills and picked none. `options` lists them |
 
 `rejected` exists because "what's the weather in Pune?" is a perfectly valid thing for a
-user to type at a bot. Treating it as a failure would produce a scary error message for
-ordinary small talk.
+user to type. Treating it as a failure would produce a scary error message for ordinary
+small talk.
 
 `needs-choice` is separate again: we understood the message and can help, we just must not
 guess. "Teach me React or maybe Vue" is a question, and answering it with a course is a
 decision the learner never made. The options are stored as a **list**, not only inside the
-sentence, so a card can offer them as buttons without re-parsing prose.
+sentence, so the app can offer them as buttons without re-parsing prose.
+
+A run lives in a `BackgroundTasks` task, which dies with the process while its job row goes
+on saying `running`. Startup closes those out as `failed`, because a learner watching a bar
+that will never move is worse than being told the run was lost. `needs-choice` and
+`needs-confirmation` are left alone: they are waiting on the learner, not on a worker.
 
 ---
 
@@ -142,7 +163,7 @@ flowchart TD
     START([prompt]) --> REQ{requirement}
     REQ -->|not a learning request| REJ([rejected])
     REQ -->|named several, chose none| CLAR([clarify])
-    REQ -->|default| SKILL[skill-analysis]
+    REQ -->|default| SKILL[subject-analysis]
     SKILL --> RES[research]
     RES --> CUR[curriculum]
     CUR --> CH[chapter]
@@ -173,7 +194,7 @@ putting them inside the loop would re-pay for all of them on every revision. On 
 20-chapter course that is 42 wasted model calls per revision, 84 across both.
 
 **The two early exits.** `requirement` routes through a **switch-case group**, the same
-construct `review` uses, with `skill-analysis` as the `Default`:
+construct `review` uses, with `subject-analysis` as the `Default`:
 
 - `is_learning_request: false` → `rejected`, a friendly "I couldn't tell what you'd like
   to learn".
@@ -220,7 +241,7 @@ the `WorkflowStep` string values, so `event.executor_id` maps straight to a prog
 | Step | Weight | Step | Weight |
 |---|---|---|---|
 | requirement | 5 | project | 10 |
-| skill-analysis | 5 | quiz | 8 |
+| subject-analysis | 5 | quiz | 8 |
 | research | 10 | review | 11 |
 | curriculum | 10 | publisher | 3 |
 | chapter | 30 | | |
@@ -236,24 +257,24 @@ An **agent** is an LLM with a job description: a name, a system prompt, a strict
 schema, and optionally some tools. Nine agents form the graph, one (`publisher`) is
 deterministic and needs no LLM, and one (`mentor`) lives outside the graph entirely.
 
-| # | Agent | Reads from state | Writes to state | Status |
-|---|---|---|---|---|
-| 1 | `requirement-agent` | `prompt` | `request` | ✅ |
-| 2 | `subject-analysis-agent` | `request` | `subject`, `sources`, `subject_trace` | ✅ |
-| 3 | `research-agent` | `request`, `subject` | `research` | ✅ |
-| 4 | `curriculum-agent` | `research`, `subject` | `curriculum` | ✅ |
-| 5 | `chapter-agent` | `curriculum`, `research` | `chapters` | ✅ |
-| 6 | `practice-agent` | `chapters` | `practice` | ✅ |
-| 7 | `project-agent` | `curriculum`, `subject` | `projects` | ✅ |
-| 8 | `quiz-agent` | `chapters` | `quizzes` | ✅ |
-| 9 | `review-agent` | `chapters` + `curriculum` | `review` | ✅ |
-| — | `publisher` (no LLM) | `curriculum`, `chapters`, `practice`, `projects`, `quizzes` | `published` | ✅ |
-| — | `mentor-agent` (outside graph) | a published course | — | 🚧 |
+| # | Agent | Reads from state | Writes to state |
+|---|---|---|---|
+| 1 | `requirement-agent` | `prompt` | `request` |
+| 2 | `subject-analysis-agent` | `request` | `subject`, `sources`, `subject_trace` |
+| 3 | `research-agent` | `request`, `subject` | `research` |
+| 4 | `curriculum-agent` | `research`, `subject` | `curriculum` |
+| 5 | `chapter-agent` | `curriculum`, `research` | `chapters` |
+| 6 | `practice-agent` | `chapters` | `practice` |
+| 7 | `project-agent` | `curriculum`, `subject` | `projects` |
+| 8 | `quiz-agent` | `chapters` | `quizzes` |
+| 9 | `review-agent` | `chapters` + `curriculum` | `review` |
+| — | `publisher` (no LLM) | `curriculum`, `chapters`, `practice`, `projects`, `quizzes` | `published` |
+| — | `mentor-agent` (outside graph) | a published course | — |
 
-### 1. `requirement-agent` ✅
+### 1. `requirement-agent`
 
-Turns a free-text Teams message into structure. **This is the only agent that sees raw
-user input**, which makes it the security and sanity boundary for everything downstream.
+Turns a free-text message into structure. **This is the only agent that sees raw user
+input**, which makes it the security and sanity boundary for everything downstream.
 
 Output — [`LearningRequest`](../backend/workflow/state.py):
 
@@ -298,7 +319,7 @@ Design points that turned out to matter a lot:
 
 Verified live on four cases including Hindi input and an off-topic prompt.
 
-### 2. `skill-analysis-agent` ✅
+### 2. `subject-analysis-agent`
 
 Sizes the topic before any content is written: category, true difficulty,
 prerequisites, estimated hours, career paths. Downstream agents need this to pitch the
@@ -306,7 +327,7 @@ material correctly — a course on Kubernetes operators for someone who already 
 Kubernetes daily should not open with "what is a container".
 
 It is the first node that **reads a field an earlier agent wrote**. `build_prompt()`
-renders `LearningRequest` into text; the raw Teams message is never seen again.
+renders `LearningRequest` into text; the learner's raw message is never seen again.
 
 Two things this node pinned down:
 
@@ -320,7 +341,7 @@ It is reached by the `Default` branch of `requirement`'s switch-case, so it runs
 prompt that neither early exit claimed. A test asserts the two exit conditions can never
 both fire for the same request.
 
-### 3. `research-agent` ✅
+### 3. `research-agent`
 
 Gathers trusted sources — official docs, Microsoft Learn, GitHub, reputable blogs. This is
 the **grounding** step: it exists so chapters are written from real, citable material
@@ -349,7 +370,7 @@ step is marked complete either way.
 **Not yet real web search.** The model proposes from memory and we filter. Swapping the
 propose step for a real search API or an Azure AI Search index is a change to one function.
 
-### 4. `curriculum-agent` ✅
+### 4. `curriculum-agent`
 
 Designs the chapter list: titles, ordering, learning objectives per chapter, paced against
 `daily_minutes`. A separate planning pass beats letting the chapter writer improvise,
@@ -372,7 +393,7 @@ orientation chapters for experienced learners was measurably ignored; replacing 
 computed, skill-specific instruction ("the learner already uses X, chapter 1 must start past
 that") removed the orientation chapter on the next run.
 
-### 5. `chapter-agent` ✅
+### 5. `chapter-agent`
 
 The workhorse — writes each chapter's actual content. It is the first step whose cost scales
 with the plan: one model call per chapter, which is why `MAX_CHAPTERS` exists and why Cosmos
@@ -402,7 +423,7 @@ A partial course is refused. If any chapter fails, the step raises and names the
 numbers, because a course silently missing chapter 3 still reads as finished. A chapter is
 only counted as failed once it has exhausted the retries described below.
 
-### 6. `practice-agent` ✅
+### 6. `practice-agent`
 
 Turns chapters into active recall. Reading a chapter feels like learning; being unable to do
 something with it proves you weren't.
@@ -453,7 +474,7 @@ The framework wraps everything in `ChatClientException` and exposes no typed rat
 error, so a service-supplied `Retry-After` cannot be honoured without depending on
 unverified internals. Backoff is blind by choice.
 
-### 7. `project-agent` ✅
+### 7. `project-agent`
 
 Portfolio projects at beginner / intermediate / advanced level, each with features, folder
 structure, milestones and stretch goals. This is what makes a course show up on a CV.
@@ -477,7 +498,7 @@ are not. A path ending in `/` is marked with `DIR_MARKER` so an empty folder is 
 as a folder, and entries that are notes rather than names (`data/pdfs/ (place PDFs here)`,
 seen live) are dropped with their parent kept as a folder.
 
-### 8. `quiz-agent` ✅
+### 8. `quiz-agent`
 
 One quiz per chapter plus a final assessment that spans the course — the only part that can
 test whether two chapters were joined up. Scored and stored, so progress is measurable
@@ -500,7 +521,7 @@ chapter made, the quiz checks the takeaways it landed.**
 A question with too few usable distractors is dropped rather than shipped; a quiz with no
 usable questions raises. Short is degraded, empty is broken.
 
-### 9. `review-agent` ✅
+### 9. `review-agent`
 
 The quality gate, and the most important agent after `requirement`. Scores the course and
 returns `ReviewResult`:
@@ -622,7 +643,7 @@ passed to it. They are all generated *from* chapter prose, so a sound chapter im
 derivatives, and the loop can only rewrite chapters anyway — but nothing checks that a quiz
 question's answer key is actually correct. That is the sharpest hole in the pipeline.
 
-### `publisher` ✅ — deterministic, no LLM
+### `publisher` — deterministic, no LLM
 
 Renders the finished course to a single Markdown document via the `exporter` skill, stores
 it, and records the link on `state.published`. **No model involved**, so it lives in
@@ -689,12 +710,22 @@ course, not by a fixture.
 hand would pass on the day it was written and miss the next service, which is exactly how
 `close_blob_storage` came to be written and never wired up.
 
-### `mentor-agent` 🚧 — outside the graph
+### `mentor-agent` — outside the graph
 
 Everything above runs **once**, to build a course. The mentor runs **forever after**,
-answering questions grounded in that user's course via Azure AI Search. It is served by
-`/mentor` endpoints, not by the workflow. This is the feature that turns a one-off
-document into an ongoing relationship.
+answering questions grounded in that learner's course. It is served by `/mentor`, not by
+the workflow. This is the feature that turns a one-off document into an ongoing
+relationship.
+
+Its safety is one field: `grounded`. A required `answer: str` on its own is a demand for an
+answer, so a model asked about something the course never covered returns its nearest
+recollection instead. When the course falls short and the question is still about the
+subject, it may go and read — and says so. When the question is off-subject it refuses.
+
+Retrieval is fetched **once** per question, over the chapters and the pages they were
+written from together. It used to ask twice, once per corpus; the index is searched by
+course rather than by corpus, so the second call returned the same passages again and half
+the prompt repeated itself under a different heading.
 
 ---
 
@@ -737,7 +768,7 @@ agents. **Changing a model here changes the prompts downstream**, because these 
 class CourseState(BaseModel):
     job_id: str
     user_id: str
-    prompt: str                                  # raw Teams text
+    prompt: str                                  # what the learner typed
 
     request: LearningRequest | None              # agent 1
     subject: SubjectAnalysis | None              # agent 2
@@ -773,7 +804,7 @@ whether a rewrite helped can only be seen by comparing a pass with the one befor
 
 ```
 LearnForgeAI/
-├── backend/                  FastAPI service — owns the workflow
+├── backend/                  FastAPI service — owns the workflow, serves the app
 │   ├── api/                  HTTP routers (thin: validate, delegate, return)
 │   ├── agents/               One module per agent + its executor
 │   ├── skills/               Reusable capabilities, one package each
@@ -783,19 +814,21 @@ LearnForgeAI/
 │   ├── schemas/              API request/response models
 │   ├── models/               Persisted entities
 │   ├── config/               Settings from env
-│   └── utils/
-├── teams-bot/                Bot Framework app — the only Teams-aware code
+│   └── static/               Built React app (gitignored; `npm run build` writes here)
+├── frontend/                 React app — library, reader, quiz, mentor
 ├── tests/                    Mirrors backend/
-├── docker/                   One Dockerfile per deployable
+├── docker/                   Multi-stage build: node builds the app, python serves it
+├── scripts/                  Provisioning, backfill, end-to-end smoke
 ├── docs/                     This file
-└── generated_courses/        Local output during development
+└── generated_courses/        Local output when Cosmos is not configured
 ```
 
 ### Why each folder exists
 
 **`backend/api/`** — Routers stay thin on purpose: validate input, kick off work, return.
-No business logic, so the same logic can later be triggered by a timer or queue instead of HTTP.
-`course.py` ✅ · `mentor.py` 🚧 · `quiz.py` 🚧 · `progress.py` 🚧
+No business logic, so the same logic can later be triggered by a timer or queue instead of
+HTTP. `auth.py` · `course.py` · `job.py` · `mentor.py` · `quiz.py` · `progress.py` ·
+`stream.py`, plus `deps.py`, which is where every route learns who is asking.
 
 **`backend/agents/`** — One module per agent, each holding the agent factory *and* its
 executor. Colocating them means everything about one graph node is in one file. Filenames
@@ -807,13 +840,13 @@ its own templates, helpers and tests without cluttering others.
 
 **`backend/workflow/`** — The orchestration layer:
 
-| File | Role | Status |
-|---|---|---|
-| `state.py` | The shared contract — read this first | ✅ |
-| `workflow.py` | Graph wiring: nodes, edges, conditions | ✅ |
-| `runner.py` | Runs the graph, translates events into job updates | ✅ |
-| `executors.py` | Deterministic non-agent nodes (rejection, publisher) | ✅ |
-| `conditions.py` | Reusable edge predicates | 🚧 |
+| File | Role |
+|---|---|
+| `state.py` | The shared contract — read this first |
+| `workflow.py` | Graph wiring: nodes, edges, conditions |
+| `runner.py` | Runs the graph, translates events into job updates |
+| `executors.py` | Deterministic non-agent nodes (rejection, publisher) |
+| `conditions.py` | Reusable edge predicates |
 
 **`backend/prompts/`** — Prompts are `.md` files, not Python strings. They can be edited,
 diffed and reviewed without touching code — a non-developer can improve a prompt in a PR.
@@ -821,64 +854,82 @@ diffed and reviewed without touching code — a non-developer can improve a prom
 
 **`backend/services/`** — All Azure SDK usage is confined here. Agents and skills never
 import an Azure SDK directly, so swapping a provider or faking one in tests touches one file.
-`foundry.py` ✅ · `job_store.py` ✅ · `course_store.py` ✅ · `cosmos.py` ✅ ·
-`blob_storage.py` ✅ · `artifact_store.py` ✅ · `ai_search.py` 🚧
+`foundry.py` · `job_store.py` · `course_store.py` · `user_store.py` · `progress_store.py` ·
+`quiz_store.py` · `cosmos.py` · `blob_storage.py` · `artifact_store.py` · `ai_search.py` ·
+`embeddings.py` · `retrieval.py` · `course_index.py` · `security.py`
 
-Both stores are **interfaces first, technology second**. Each now has two implementations
-behind a `Protocol` — Cosmos when `COSMOS_ENDPOINT` is set, in-memory/JSON files otherwise —
+The stores are **interfaces first, technology second**. Each has two implementations behind
+a `Protocol` — Cosmos when `COSMOS_ENDPOINT` is set, in-memory or JSON files otherwise —
 and the swap happens on one line at the bottom of each module. No caller changed.
 Local development and the whole offline test suite still need no Azure account.
 
-**`backend/schemas/` vs `backend/models/`** — A deliberate split. `schemas/` is the public
-API shape (what Teams sends and receives); `models/` is what we persist. Keeping them apart
-means a database change doesn't silently alter the public API.
+Clients that hold a connection are **cached for the process and closed once**, in the
+lifespan. Building one per call costs a TLS handshake before anything can be asked:
+measured at 4.4s a search query against 286ms on a shared client.
 
-**`teams-bot/`** — Separately deployable. `backend_client.py` is the *only* place it talks
-to the backend, and it never imports from `backend/` — the two communicate strictly over
-HTTP, so they can scale and deploy independently.
+**`backend/schemas/` vs `backend/models/`** — A deliberate split. `schemas/` is the public
+API shape; `models/` is what we persist. Keeping them apart means a database change doesn't
+silently alter the public API. `schemas/document.py` is the clearest case: it is a
+projection built only from what a reader may see, so the reviewer's verdicts and the quiz
+answer keys cannot leave the server by accident.
+
+**`frontend/`** — React and Vite. It talks to the API over HTTP and never assumes anything
+about it beyond the types in `src/api/types.ts`. `npm run build` writes into
+`backend/static`, which FastAPI serves; in development `npm run dev` proxies the API so the
+paths match production.
 
 **`tests/`** — Mirrors `backend/`. Split into two layers:
 
 | Layer | Command | Speed | Proves |
 |---|---|---|---|
-| Offline (default) | `pytest -q` | ~4s | Wiring, schemas, conditions |
-| Live (opt-in) | `pytest -m live` | ~45s, costs tokens | The *model* behaves |
+| Offline (default) | `pytest -q` | ~20s | Wiring, schemas, conditions, authorisation |
+| Live (opt-in) | `pytest -m live` | minutes, costs tokens | The *model* behaves |
+| Frontend | `npm test` in `frontend/` | ~10s | Rendering and the API client |
+| End to end | `python scripts/e2e_smoke.py` | ~25 min, costs tokens | A real course, against a running server |
 
 `pytest.ini` sets `addopts = -m "not live"` so live tests never run by accident.
+`tests/conftest.py` pins every endpoint setting to empty, so the offline suite cannot
+quietly reach live Azure because a developer happens to have a `.env`.
 
 ---
 
 ## 9. Azure services
 
-| Service | Purpose | Status |
-|---|---|---|
-| Microsoft Foundry | `gpt-5-mini` — every agent's model | ✅ live |
-| Azure AI Search | Grounding for research + mentor | 📋 |
-| Cosmos DB | Users, courses, progress, scores, chat history | ✅ |
-| Blob Storage | Published course Markdown, private, user-delegation SAS links | ✅ |
-| Container Apps | Hosts backend + teams-bot | 📋 |
+| Service | Purpose |
+|---|---|
+| Microsoft Foundry | `gpt-5-mini` for every agent, `text-embedding-3-small` for the index |
+| Azure AI Search | Hybrid retrieval for the mentor, scoped to one course and one owner |
+| Cosmos DB | Users, jobs, courses, progress, scores |
+| Blob Storage | Published course Markdown, private, user-delegation SAS links |
 
-### Planned Cosmos containers
+Not deployed anywhere yet — see §11.
+
+### Cosmos containers
 
 All partitioned by `/user_id`, because every read is scoped to one learner.
 
-| Container | Holds | Replaces | TTL |
-|---|---|---|---|
-| `jobs` | Generation runs and progress | `InMemoryJobStore` | 30 days |
-| `courses` | The generated course | `FileCourseStore` | none |
-| `progress` | Chapters read, completion | — | none |
-| `quiz_results` | Answers and scores | — | none |
-| `chat_history` | Mentor conversations | — | 90 days |
-
-The first two have data today and are already behind interfaces. The other three arrive
-with the features that produce them.
+| Container | Holds | TTL |
+|---|---|---|
+| `users` | Accounts: email, name, scrypt hash | none |
+| `jobs` | Generation runs and progress | 30 days |
+| `courses` | The generated course | none |
+| `progress` | Chapters read, completion | none |
+| `quiz_results` | Answers and scores | none |
+| `chat_history` | Mentor conversations | 90 days |
 
 **Indexing is opt-in, not default.** Cosmos indexes every property unless told otherwise,
 and a `courses` document holds the entire `CourseState` — every chapter of prose. Indexing
 that would inflate write cost and storage for paths nothing ever filters on, so
 `infra/cosmos/courses-index.json` excludes `/*` and includes only `/user_id`, `/job_id`
 and `/created_at`, plus a composite index on `(user_id ASC, created_at DESC)` for the
-"my courses, newest first" list the Teams bot will need.
+"my courses, newest first" list.
+
+**Reads are projected.** A stored course runs to hundreds of kilobytes, and the reviewer's
+verdicts and quiz answer keys are about a third of it that no reader ever sees. The library
+selects a title and a chapter count; the reader selects the chapters and what hangs off
+them. Measured on the live account: the library went from 21.0s to 0.67s, and a course read
+from 27.5s to 12.5s. A test pins that the projected document is byte-identical to the full
+one, so the fast path cannot become a second, drifting definition of a course.
 
 **Auth is keyless.** `DefaultAzureCredential` everywhere; no secrets in `.env`. Note that
 Cosmos has a *second* RBAC system for the data plane: subscription `Owner` grants nothing
@@ -898,6 +949,26 @@ Two traps already hit and worth recording:
 - **Quota.** In this subscription every `Standard` SKU quota is 0 — capacity exists only in
   `GlobalStandard`. Deploying with the portal's default fails with a misleading quota error.
 
+### The search index
+
+One index, `course-passages`, holding every chapter of every course as a passage with a
+vector. Every query is filtered to one course **and** one owner, so retrieval cannot reach
+another learner's material. A course indexes itself when it is generated; `drop_course`
+clears the old passages first, because a regenerated course keeps its id.
+
+Retrieval sits behind an interface with two implementations. Lexical set-cover is not a
+degraded mode: measured on a real course it answered six of six covered questions in 33ms.
+Search earns its place on paraphrase and scale — term coverage 62% against 88% on one
+course, and 16% against 82% on another whose research corpus was thin. When the index has
+nothing for a course, search falls back to lexical rather than answering from nothing.
+
+**Vectors are 90% of the index**, so their width decides what fits. At 1536 dimensions a
+course took 3.92 MB and only twelve fit the tier's 50 MB, after which indexing would have
+started failing and swallowing it. `text-embedding-3-small` is trained so a shortened
+vector still works: at 512 a course takes 1.51 MB, thirty-two fit, and measured coverage is
+unchanged. The embedding call and the index field read the same setting, and a test pins
+that they agree — a vector of the wrong width is rejected on upload.
+
 ---
 
 ## 10. Key design decisions
@@ -910,54 +981,78 @@ Two traps already hit and worth recording:
 | Executor id == `WorkflowStep` | Progress mapping is a lookup, not a translation table |
 | Prompts in `.md` | Editable and reviewable without code changes |
 | Structured output everywhere | Downstream agents parse fields, never prose |
-| Async jobs + polling | Generation outlives any HTTP timeout |
+| Async jobs + streamed progress | Generation outlives any HTTP timeout |
 | `rejected` ≠ `failed` | Off-topic chat isn't an error |
 | Two-layer tests | Fast feedback by default; model checks on demand |
+| The learner comes from the token | A caller who names themselves is not authenticated |
+| The API projects what it returns | What is never built cannot leak |
+| One deployable | App and API share an origin, so there is no CORS and one url to deploy |
 
 ---
 
 ## 11. Known gaps
 
-Real, tracked, and deliberately deferred:
+Real, tracked, and deliberately deferred. Everything not listed here is built and tested.
 
-1. **Durability** — `BackgroundTasks` dies with the process, orphaning in-flight jobs.
-   `WorkflowBuilder` accepts `checkpoint_storage=`; that's the path.
-2. **Job store is in-memory** — restarts lose progress records. Finished courses survive
-   (JSON on disk), so only in-flight jobs are at risk.
-3. **Parallelism is unsafe today** — state is shared by reference (see §4).
-4. **Python version mismatch** — local venv is 3.13, Dockerfiles pin `python:3.12-slim`.
-5. **Single `requirements.txt`** — should split per container once they deploy separately.
-6. **No auth on the backend** — Teams identity is trusted but not yet verified. `GET
-   /courses/{id}` currently returns any course to any caller; ownership is stored
-   (`user_id`) but not enforced.
+1. **Nothing is deployed.** The image builds the app and serves it, and tests pin that
+   vite's output path, the Dockerfile's `COPY` and the path FastAPI serves from agree —
+   but the image itself has never been built, because Docker is not installed on the
+   machine this was written on. `docker compose build` is the unrun step.
+2. **Durability** — a run lives in `BackgroundTasks`, which dies with the process. Startup
+   closes the orphans out as `failed` so nobody watches a dead bar, but the work is lost.
+   `WorkflowBuilder` accepts `checkpoint_storage=`; that is the path to resuming instead.
+3. **One process owns every run.** The startup sweep in gap 2 is cross-partition and would
+   abandon another instance's live jobs, so scaling out needs a lease first.
+4. **Parallelism is unsafe** — state is shared by reference (see §4). `practice`, `project`
+   and `quiz` are logically independent and tempting to run together; doing so needs
+   per-branch state and a merge.
+5. **The index will fill silently.** 26 MB of the tier's 50 MB is used, about sixteen more
+   courses, and `index_course` swallows its failures by design so a course still generates
+   when indexing fails. It will stop indexing without saying so.
+6. **Revocation has nothing to revoke.** A deleted account's token stops working within a
+   minute, but there is no way to delete or disable an account through the product.
+7. **The look-up path is slow.** When a course genuinely does not cover a question the
+   mentor goes and reads, which takes 45s or more. Measured once at 171s.
+8. **Python version mismatch** — local venv is 3.13, the Dockerfile pins `python:3.12-slim`.
+9. **Mobile is unverified.** The app was driven at one window size; the header wrapped
+   awkwardly at around 445px and nothing narrower has been tried.
 
 ---
 
 ## 12. Build order
 
-| # | Milestone | Status |
-|---|---|---|
-| 1 | Foundry client + settings, live call | ✅ |
-| 2 | `requirement-agent` + structured output | ✅ |
-| 3 | One-node workflow, verified live | ✅ |
-| 4 | HTTP → job → workflow → progress slice | ✅ |
-| 5 | Rejection path for off-topic prompts | ✅ |
-| 6 | Tests: offline + opt-in live layers | ✅ |
-| 7 | Course persistence + `GET /courses/{id}` | ✅ |
-| 8 | `skill-analysis-agent` — first agent-to-agent handoff | ✅ |
-| 9 | `research-agent` + source verification | ✅ |
-| 10 | **`curriculum-agent`** | ✅ |
-| 11 | Cosmos swap for jobs and courses | ✅ |
-| 12 | **`chapter-agent`** — the content core | ✅ |
-| 13 | `practice` ✅, `quiz` ✅, `project` ✅ | ✅ |
-| 14 | `review-agent` + the regeneration loop | ✅ |
-| 15 | `publisher` + Blob Storage export | ✅ |
-| 16 | Teams bot + Adaptive Cards | 📋 |
-| 17 | Mentor agent | 📋 |
-| 18 | Deploy to Container Apps | 📋 |
+Each milestone was runnable end-to-end, so there was always something to test rather than a
+large half-built graph.
 
-Cosmos lands at step 11 — deliberately *before* `chapter-agent`, the first step whose
+| # | Milestone |
+|---|---|
+| 1 | Foundry client + settings, live call |
+| 2 | `requirement-agent` + structured output |
+| 3 | One-node workflow, verified live |
+| 4 | HTTP → job → workflow → progress slice |
+| 5 | Rejection path for off-topic prompts |
+| 6 | Tests: offline + opt-in live layers |
+| 7 | Course persistence + `GET /courses/{id}` |
+| 8 | `subject-analysis-agent` — first agent-to-agent handoff |
+| 9 | `research-agent` + source verification |
+| 10 | `curriculum-agent` |
+| 11 | Cosmos swap for jobs and courses |
+| 12 | `chapter-agent` — the content core |
+| 13 | `practice`, `quiz`, `project` |
+| 14 | `review-agent` + the regeneration loop |
+| 15 | `publisher` + Blob Storage export |
+| 16 | `mentor-agent`, grounded, with a refusal it will actually use |
+| 17 | Azure AI Search behind a retrieval interface |
+| 18 | Accounts, and the learner taken from the token rather than the url |
+| 19 | The course as a document, and progress streamed over SSE |
+| 20 | React app: library, reader, quiz, mentor — served by FastAPI |
+
+Cosmos landed at step 11 — deliberately *before* `chapter-agent`, the first step whose
 output is expensive enough that losing it hurts.
 
-The order is deliberate: each milestone is runnable end-to-end, so there is always
-something to test rather than a large half-built graph.
+Step 16 replaced what had been planned as a Teams bot. A book does not belong in a chat
+window: the reader wants a contents page, a chapter open in front of them, and the mentor
+beside it. The bot was written, worked, and was deleted when the product moved; it is in
+the history if that decision is ever revisited.
+
+What remains is gap 1: build the image and deploy it.
