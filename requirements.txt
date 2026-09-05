@@ -38,10 +38,3 @@ httpx
 tenacity
 structlog
 python-dotenv
-
-# --- Dev ---
-pytest
-pytest-asyncio
-ruff
-debugpy
-agent-dev-cli>=0.0.1b260427

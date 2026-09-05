@@ -1,0 +1,13 @@
+# Everything the app needs, plus the tools for working on it. The image installs
+# requirements.txt alone, so pytest and ruff never ship to production.
+-r requirements.txt
+
+pytest
+pytest-asyncio
+ruff
+debugpy
+
+# agent-dev-cli is deliberately absent. It pins agent-framework-core<1.3.0 while the app
+# needs >=1.13.0, so the two cannot be resolved together: a clean `pip install` of the old
+# combined file failed outright. It had never actually installed here, which is why nothing
+# noticed until an image was built from scratch.

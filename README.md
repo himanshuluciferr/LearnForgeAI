@@ -56,7 +56,9 @@ regeneration instead of publishing. `mentor` runs on a separate post-generation 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+# The app's own dependencies are requirements.txt; this adds the tools for working on it.
+# The image installs requirements.txt alone, so pytest and ruff never ship to production.
+pip install -r requirements-dev.txt
 copy .env.example .env
 
 # The app is served by the API, so it has to be built first.
@@ -78,3 +80,43 @@ pytest -m live              # calls the real model; costs money
 cd frontend; npm test
 python scripts\e2e_smoke.py # generates a real course against a running server
 ```
+
+## Deploying
+
+`infra/main.bicep` adds hosting to the resource group the backing services already live in.
+It reads Cosmos, Search, Storage and Foundry rather than creating them, so a deployment
+cannot disturb the data they hold.
+
+**Two passes, and the order matters.** The identity and its role assignments come first, so
+`AcrPull` already exists by the time the app tries to pull. Running it in one pass fails:
+there is nothing in the registry yet, and a system-assigned identity would not exist until
+the app that needs the grant had already started.
+
+```powershell
+# 1. identity, registry, environment, roles
+az deployment group create -g rg-learnforge --template-file infra\main.bicep `
+  --parameters deployApp=false
+
+# 2. the image, built in Azure so no local Docker daemon is needed
+az acr build --registry <registry> --image mentora:v1 `
+  --file docker/backend.Dockerfile --no-logs .
+
+# 3. the app itself
+$rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+$b = New-Object byte[] 48; $rng.GetBytes($b)
+$k = [Convert]::ToBase64String($b).Replace('+','-').Replace('/','_').TrimEnd('=')
+az deployment group create -g rg-learnforge --template-file infra\main.bicep `
+  --parameters deployApp=true containerImage="<registry>.azurecr.io/mentora:v1" jwtSecret=$k
+```
+
+Generate the key with `RNGCryptoServiceProvider`, not `RandomNumberGenerator::Fill` — the
+latter does not exist in Windows PowerShell 5.1, and the call throwing leaves the buffer
+full of zeros. That produces a 64-character key of base64 nothing, so checking the length
+tells you it worked when it did not.
+
+Two things that will otherwise waste an afternoon: `--no-logs` on `az acr build` is not
+optional on Windows, because the CLI crashes printing Vite's `✓` whatever the console
+encoding is — read a failed build with the run's `listLogSasUrl` instead. And the app runs
+at `minReplicas: 1` deliberately: generation is an in-process background task that sends no
+requests for twenty minutes, so anything that scales on request count would decide the app
+was idle and kill the run.
