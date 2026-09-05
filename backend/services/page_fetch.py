@@ -43,7 +43,7 @@ MAX_FILES_PER_FOLDER = 8
 # Wikimedia 403s a vague contact string on both its API and REST endpoints and returns 200 as
 # soon as the User-Agent carries a contact URL. Set in one place: fixing it in the search
 # provider and leaving the fetcher behind made every Wikipedia read fail silently.
-USER_AGENT = "LearnForgeAI/0.1 (+https://github.com/learnforge; course research)"
+USER_AGENT = "MentoraAI/0.1 (+https://github.com/himanshuluciferr/LearnForgeAI; course research)"
 
 
 def is_fetchable(url: str) -> bool:

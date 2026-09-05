@@ -6,7 +6,14 @@
   --accent: #7c2d12;
   --accent-soft: #fef3c7;
   --danger: #b91c1c;
-  font-family: "Iowan Old Style", Georgia, "Times New Roman", serif;
+
+  /* Three roles. Display carries the name and the headings, reading carries anything long
+     enough to be read rather than scanned, and sans carries the controls. */
+  --display: "Fraunces Variable", Georgia, serif;
+  --reading: "Literata Variable", Georgia, serif;
+  --sans: "Inter Variable", system-ui, "Segoe UI", sans-serif;
+
+  font-family: var(--reading);
   color: var(--ink);
 }
 
@@ -21,7 +28,33 @@ body {
 
 button,
 input {
-  font: inherit;
+  font-family: var(--sans);
+  font-size: 1rem;
+}
+
+h1,
+h2,
+h3,
+.brand,
+.gate-mark,
+.gate-title,
+.book-title {
+  font-family: var(--display);
+  /* Fraunces is drawn dark by default; easing the optical size keeps headings from shouting. */
+  font-variation-settings: "SOFT" 20, "WONK" 1;
+  letter-spacing: -0.015em;
+}
+
+/* Controls, labels and anything read at a glance rather than at length. */
+.pill,
+.hint,
+.small,
+.muted,
+label,
+.chapter-number,
+.block h4,
+.callout h4 {
+  font-family: var(--sans);
 }
 
 .page {
@@ -96,6 +129,134 @@ h2.section {
   display: grid;
   gap: 0.3rem;
   font-size: 0.9rem;
+}
+
+/* --- the way in -------------------------------------------------------------------- */
+
+.gate {
+  position: relative;
+  /* Keeps the photograph's stacking to itself, so nothing here can slip behind the page. */
+  isolation: isolate;
+  min-height: 100vh;
+  /* dvh so the mobile browser's collapsing address bar cannot leave a strip of blank page. */
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 1.5rem;
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+.gate-photo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Holds the books in frame on a portrait phone, where a wide photograph is cropped to a
+     narrow slice of its middle. */
+  object-position: 38% center;
+}
+@media (min-width: 60rem) {
+  .gate-photo {
+    object-position: center;
+  }
+}
+
+/* Buys contrast for the wordmark at the top and settles the panel into the picture rather
+   than leaving it stuck on top of it. */
+.gate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to bottom, rgb(20 12 6 / 55%), transparent 38%),
+    linear-gradient(to top, rgb(20 12 6 / 45%), transparent 40%);
+}
+
+.gate-brand,
+.gate-panel {
+  position: relative;
+  z-index: 2;
+}
+
+.gate-brand {
+  color: #fdf6ec;
+  max-width: 34rem;
+}
+.gate-mark {
+  margin: 0;
+  font-size: clamp(1.6rem, 3.4vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.gate-line {
+  margin: 0.3rem 0 0;
+  font-size: clamp(0.9rem, 1.6vw, 1.05rem);
+  line-height: 1.5;
+  /* Literata sets wider than Georgia did: at 38ch this needed 420px and only had 370, so it
+     broke into two short lines that balance then made narrower still. */
+  max-width: 46ch;
+  text-wrap: balance;
+  color: #e8dccb;
+}
+
+.gate-panel {
+  align-self: center;
+  justify-self: center;
+  width: min(25rem, 100%);
+  padding: clamp(1.5rem, 3vw, 2.1rem);
+  border-radius: 18px;
+  border: 1px solid rgb(255 255 255 / 55%);
+  /* Mostly paper on purpose. At 62% the panel took its tint from whatever the crop happened
+     to put behind it, and the same text measured 5.1:1 on desktop but 4.0:1 on a phone. */
+  background: rgb(255 253 249 / 74%);
+  backdrop-filter: blur(20px) saturate(135%);
+  -webkit-backdrop-filter: blur(20px) saturate(135%);
+  box-shadow:
+    0 26px 60px -26px rgb(28 16 8 / 65%),
+    inset 0 1px 0 rgb(255 255 255 / 65%);
+}
+@media (min-width: 60rem) {
+  .gate-panel {
+    /* The photograph keeps its books on the left, so the panel takes the quiet wall. */
+    justify-self: end;
+    margin-right: clamp(0rem, 5vw, 5rem);
+  }
+}
+/* Without the blur the glass is only a pale wash, and the photograph reads straight through
+   the text. Trade the effect for legibility. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .gate-panel {
+    background: rgb(255 253 249 / 94%);
+  }
+}
+
+.gate-panel .auth {
+  width: 100%;
+}
+.gate-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+/* An opaque white field would punch a solid hole in the glass. */
+.gate-panel input {
+  background: rgb(255 255 255 / 55%);
+  border-color: rgb(255 255 255 / 75%);
+}
+.gate-panel input:focus {
+  background: rgb(255 255 255 / 92%);
+}
+/* The glass sits on a warm mid-tone wall, and --muted only ever had contrast against solid
+   paper: it measures 3.2:1 here. This is 5.1:1. */
+.gate-panel .hint,
+.gate-panel .muted {
+  color: #57534e;
+}
+.gate-panel button[type="submit"] {
+  margin-top: 0.35rem;
 }
 
 input {

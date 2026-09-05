@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "./AuthContext";
+import library from "../assets/library.jpg";
 
 const MIN_PASSWORD = 8;
 
@@ -26,56 +27,66 @@ export function SignIn() {
   };
 
   return (
-    <div className="centre">
-      <form className="card auth" onSubmit={submit}>
-        <h1 className="brand">LearnForge</h1>
-        <p className="muted">Tell it what you want to learn. It writes you the book.</p>
+    <div className="gate">
+      {/* Decorative: the promise is already made in words below, so a screen reader gains
+          nothing from the picture and an alt text here would just be noise. */}
+      <img className="gate-photo" src={library} alt="" aria-hidden="true" />
 
-        {joining && (
+      <header className="gate-brand">
+        <p className="gate-mark">Mentora AI</p>
+        <p className="gate-line">Tell it what you want to learn. It writes you the book.</p>
+      </header>
+
+      <div className="gate-panel">
+        <form className="auth" onSubmit={submit}>
+          <h1 className="gate-title">{joining ? "Create your account" : "Sign in"}</h1>
+
+          {joining && (
+            <label>
+              Name
+              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+            </label>
+          )}
           <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+            Email
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username"
+            />
           </label>
-        )}
-        <label>
-          Email
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
-          />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            required
-            minLength={MIN_PASSWORD}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={joining ? "new-password" : "current-password"}
-          />
-        </label>
-        {joining && <p className="hint">At least {MIN_PASSWORD} characters.</p>}
+          <label>
+            Password
+            <input
+              type="password"
+              required
+              minLength={MIN_PASSWORD}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={joining ? "new-password" : "current-password"}
+            />
+          </label>
+          {joining && <p className="hint">At least {MIN_PASSWORD} characters.</p>}
 
-        {error && <p className="error">{error}</p>}
+          {error && <p className="error">{error}</p>}
 
-        <button type="submit" disabled={busy}>
-          {busy ? "One moment…" : joining ? "Create account" : "Sign in"}
-        </button>
-        <button
-          type="button"
-          className="link"
-          onClick={() => {
-            setJoining(!joining);
-            setError(null);
-          }}
-        >
-          {joining ? "I already have an account" : "I need an account"}
-        </button>
-      </form>
+          <button type="submit" disabled={busy}>
+            {busy ? "One moment…" : joining ? "Create account" : "Sign in"}
+          </button>
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              setJoining(!joining);
+              setError(null);
+            }}
+          >
+            {joining ? "I already have an account" : "I need an account"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

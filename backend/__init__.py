@@ -1,1 +1,1 @@
-"""LearnForge AI backend package."""
+"""Mentora AI backend package."""

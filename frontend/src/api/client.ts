@@ -13,7 +13,7 @@ import type {
   Session,
 } from "./types";
 
-const TOKEN_KEY = "learnforge.token";
+const TOKEN_KEY = "mentora.token";
 
 export class ApiError extends Error {
   constructor(

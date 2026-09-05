@@ -1,4 +1,4 @@
-# LearnForge AI
+# Mentora AI
 
 AI-powered personalized course generation, delivered as a web app.
 

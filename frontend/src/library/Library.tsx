@@ -48,7 +48,7 @@ export function Library() {
   return (
     <div className="page">
       <header className="bar">
-        <span className="brand">LearnForge</span>
+        <span className="brand">Mentora AI</span>
         <span className="spacer" />
         <span className="muted">{learner?.name || learner?.email}</span>
         <button className="link" onClick={signOut}>

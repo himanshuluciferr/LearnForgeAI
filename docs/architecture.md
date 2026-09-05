@@ -1,4 +1,4 @@
-# LearnForge AI — Architecture
+# Mentora AI — Architecture
 
 Source of truth for the design: what we are building, how the pieces fit, what every
 agent and skill does, and why the folders are laid out this way.

@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await close_search()
 
 
-app = FastAPI(title="LearnForge AI", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Mentora AI", version="0.1.0", lifespan=lifespan)
 
 # A course document is a few hundred kilobytes of JSON read from another continent, and
 # measured at 3.3x smaller compressed. The stream opts out by setting its own

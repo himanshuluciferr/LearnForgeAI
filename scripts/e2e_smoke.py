@@ -41,7 +41,7 @@ BASE = "http://127.0.0.1:8000"
 
 # A fresh account per run. No password in source, and no run inheriting the last one's
 # courses. The id is printed at the end so the rows can be found and removed.
-EMAIL = f"e2e-{uuid4().hex[:10]}@learnforge.local"
+EMAIL = f"e2e-{uuid4().hex[:10]}@mentora.local"
 PASSWORD = secrets.token_urlsafe(24)
 
 # Overridable because git rebase is something the model knows cold, so a grounded course and a
