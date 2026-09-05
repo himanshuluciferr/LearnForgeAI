@@ -28,7 +28,7 @@ export function CourseReader() {
 
   return (
     <div className="page">
-      <header className="bar">
+      <header className="bar page-bar">
         <button className="link" onClick={() => navigate("/")}>
           ← Library
         </button>

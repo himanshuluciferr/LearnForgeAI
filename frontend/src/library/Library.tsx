@@ -47,7 +47,7 @@ export function Library() {
 
   return (
     <div className="page">
-      <header className="bar">
+      <header className="bar app-head">
         <span className="brand">Mentora AI</span>
         <span className="spacer" />
         <span className="muted">{learner?.name || learner?.email}</span>
